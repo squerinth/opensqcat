@@ -33,7 +33,7 @@ Omit `-NvgtPath` to use `NVGT_EXE`, then `nvgt.exe` on `PATH`. Use `-BuildDirect
 
 There is no separate library build step. The repository keeps library source in `src/`; releases distribute it as `opensqcat/` and include a global wrapper. Development and testing use NVGT's Latest/Bleeding Edge Development Version. Record the verified compiler version and commit as test provenance, without pinning future runs to that build.
 
-ZIP entries start directly at the distribution root; do not add a versioned containing directory. Keep contribution guidance in the repository-root `CONTRIBUTING.md` rather than duplicating it under advanced documentation.
+ZIP entries start directly at the distribution root; do not add a versioned containing directory. The four top-level entries are `opensqcat/`, `examples/`, `opensqcat.nvgt` and `README.md`. The installable `opensqcat/` folder contains its entry point, inner implementation directory, `docs/` and the complete `LICENSE`; project and global installation must preserve them. The source repository retains `doc/` and root `LICENSE`; packaging copies them into the installable folder and adjusts README links. Keep contribution guidance in the repository-root `CONTRIBUTING.md` rather than duplicating it under advanced documentation.
 
 ## Coding Style & Naming Conventions
 

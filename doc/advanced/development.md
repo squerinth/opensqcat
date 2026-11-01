@@ -103,11 +103,13 @@ commit or tag instead. Keep `VERSION`, the README version and `CHANGELOG.md`
 aligned. Without a supplied compiler, the packager obtains the current NVGT
 development build automatically.
 
-The resulting `release/opensqcat-<version>.zip` contains the installable
-`opensqcat/` folder, the global wrapper, examples, the complete documentation tree
-and `LICENSE`. Entries start directly at the distribution root. Tests, tools,
-workspace folders and repository metadata are excluded. The example's include is
-adjusted from the repository layout to the installed layout.
+The resulting `release/opensqcat-<version>.zip` has exactly four top-level
+entries: `opensqcat/`, `examples/`, `opensqcat.nvgt` and `README.md`. The installable
+`opensqcat/` folder contains the entry point, the inner implementation folder,
+`docs/` and `LICENSE`, so copying it preserves the license and documentation.
+The repository's `doc/` and root license remain the packaging sources. Tests,
+tools, workspace folders and repository metadata are excluded. README links and
+the example's include are adjusted for the distribution layout.
 
 The packager extracts and verifies the ZIP, including global installation, before
 writing it and its SHA-256 sidecar to `release/`. Failed verification leaves any

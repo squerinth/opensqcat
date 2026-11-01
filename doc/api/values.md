@@ -100,4 +100,5 @@ bool resolve_player(const string&in name, var@&out result) {
 }
 ```
 
-See [the complete console example](../../examples/messages.nvgt).
+See [the live-values tutorial](../tutorials/live-values.md) for the complete
+console example supplied separately in the release ZIP's `examples/` folder.

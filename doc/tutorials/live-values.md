@@ -1,6 +1,6 @@
 # Live application values
 
-The [console example](../../examples/messages.nvgt) shows how a resolver reads
+The release ZIP's `examples/messages.nvgt` program shows how a resolver reads
 current application state without copying it into the translator for each call.
 It also demonstrates local and cross-catalog references.
 
@@ -11,6 +11,10 @@ Extract a release archive or use a repository checkout. From its root, run:
 ```powershell
 C:/nvgt/nvgt.exe -w 2 examples/messages.nvgt
 ```
+
+The `examples/` folder is beside the library in the ZIP. Keep that folder when
+following this tutorial; copying only the library into a project does not
+install the separate examples.
 
 The example loads `examples/locales/en.sqcat` and `common.sqcat`. NVGT resolves
 the relative catalog paths from the script directory.

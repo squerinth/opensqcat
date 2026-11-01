@@ -10,3 +10,9 @@ Initial release of OpenSQCat for NVGT.
 - Typed general values, temporary dictionaries and dynamic providers or resolvers.
 - Structured diagnostics, bounded evaluation and shared evaluation budgets.
 - Format specification, API reference, runnable examples and standalone verification.
+
+## 0.1.1
+
+Small bugfixes and distribution improbements
+
+- Modified the distribution package: from now on, the license file and documentation are in the redistributable directory of OpenSQCat

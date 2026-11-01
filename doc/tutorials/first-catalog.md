@@ -5,9 +5,10 @@ shared values and checks for a missing message. It assumes NVGT is installed.
 
 ## 1. Install the library
 
-Follow the [project installation](../../README.md#project-installation). Your
-working directory should contain an `opensqcat/` folder with `opensqcat.nvgt`
-inside it. Create a `locales/` directory beside that folder.
+Copy the release ZIP's entire `opensqcat/` folder into your project, including
+its `LICENSE` and `docs/`. It contains the `opensqcat.nvgt` entry point and an
+inner `opensqcat/` implementation folder. Create a `locales/` directory beside
+the outer library folder.
 
 ## 2. Write the catalog
 

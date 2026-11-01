@@ -1,7 +1,8 @@
 # OpenSQCat documentation
 
-The complete documentation is included in every release. Choose a section based
-on what you need:
+In a release, this documentation is in the installable library's `docs/` folder,
+alongside its [license notice](../LICENSE). Copy the complete library folder to
+keep both with the source. Choose a section based on what you need:
 
 | Section | Purpose |
 | --- | --- |

@@ -47,20 +47,22 @@ try {
 	}
 	$version = (Get-Content -LiteralPath (Join-Path $snapshotRoot 'VERSION') -Raw -Encoding UTF8).Trim()
 	if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION must contain major.minor.patch.' }
+	if (-not (Test-Path -LiteralPath (Join-Path $snapshotRoot 'LICENSE') -PathType Leaf)) { throw 'Release omits license: LICENSE' }
 	$releaseName = "opensqcat-$version"
 	$releaseRoot = Join-Path $staging $releaseName
 	New-Item -ItemType Directory -Path $releaseRoot | Out-Null
 
 	# A release exposes the installable folder promised by the README.
 	$sourcePrefix = [IO.Path]::GetFullPath($releaseRoot).TrimEnd('\') + '\'
-	Copy-Item -LiteralPath (Join-Path $snapshotRoot 'src') -Destination (Join-Path $releaseRoot 'opensqcat') -Recurse
-	foreach ($directory in @('examples', 'doc')) {
-		Copy-Item -LiteralPath (Join-Path $snapshotRoot $directory) -Destination $releaseRoot -Recurse
-	}
-	foreach ($file in @('README.md', 'LICENSE')) {
-		Copy-Item -LiteralPath (Join-Path $snapshotRoot $file) -Destination $releaseRoot
-	}
+	$libraryRoot = Join-Path $releaseRoot 'opensqcat'
+	Copy-Item -LiteralPath (Join-Path $snapshotRoot 'src') -Destination $libraryRoot -Recurse
+	Copy-Item -LiteralPath (Join-Path $snapshotRoot 'doc') -Destination (Join-Path $libraryRoot 'docs') -Recurse
+	Copy-Item -LiteralPath (Join-Path $snapshotRoot 'LICENSE') -Destination $libraryRoot
+	Copy-Item -LiteralPath (Join-Path $snapshotRoot 'examples') -Destination $releaseRoot -Recurse
 	$utf8 = [Text.UTF8Encoding]::new($false)
+	$readme = [IO.File]::ReadAllText((Join-Path $snapshotRoot 'README.md'))
+	$readme = $readme.Replace('](doc/', '](opensqcat/docs/').Replace('](LICENSE)', '](opensqcat/LICENSE)')
+	[IO.File]::WriteAllText((Join-Path $releaseRoot 'README.md'), $readme, $utf8)
 	foreach ($script in @('examples/messages.nvgt')) {
 		$path = Join-Path $releaseRoot $script
 		$content = [IO.File]::ReadAllText($path)
@@ -73,7 +75,8 @@ try {
 
 	if ($documents.Count -eq 0) { throw 'Release must contain documentation.' }
 	foreach ($required in @('doc/README.md', 'doc/api/README.md', 'doc/tutorials/README.md', 'doc/advanced/README.md') + $documents) {
-		if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot $required) -PathType Leaf)) {
+		$packagedPath = 'opensqcat/docs/' + $required.Substring(4)
+		if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot $packagedPath) -PathType Leaf)) {
 			throw "Release omits documentation: $required"
 		}
 	}
@@ -102,12 +105,13 @@ try {
 	Expand-Archive -LiteralPath $archive -DestinationPath $extracted
 	$sourceRoot = $extracted
 	foreach ($document in $documents) {
-		$original = Join-Path $releaseRoot $document
-		$packaged = Join-Path $sourceRoot $document
+		$original = Join-Path $snapshotRoot $document
+		$packaged = Join-Path $sourceRoot ('opensqcat/docs/' + $document.Substring(4))
 		if (-not (Test-Path -LiteralPath $packaged -PathType Leaf) -or (Get-FileHash -LiteralPath $original).Hash -cne (Get-FileHash -LiteralPath $packaged).Hash) {
 			throw "Packaged documentation differs: $document"
 		}
 	}
+	if ((Get-FileHash -LiteralPath (Join-Path $snapshotRoot 'LICENSE')).Hash -cne (Get-FileHash -LiteralPath (Join-Path $sourceRoot 'opensqcat/LICENSE')).Hash) { throw 'Packaged license differs from the source notice.' }
 	if ([string]::IsNullOrWhiteSpace($NvgtPath)) {
 		$NvgtPath = & (Join-Path $snapshotRoot 'tools/get-nvgt.ps1') -BuildDirectory (Join-Path $buildRoot 'toolchain')
 	}

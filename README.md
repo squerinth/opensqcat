@@ -22,7 +22,21 @@ PowerShell; using the library does not require those tools.
 
 Download an OpenSQCat ZIP from the
 [releases page](https://github.com/squerinth/opensqcat/releases) and extract it.
-The archive includes the library, examples and complete documentation.
+The archive has four top-level entries:
+
+```
+opensqcat/
+    docs/
+    LICENSE
+    opensqcat/
+    opensqcat.nvgt
+examples/
+opensqcat.nvgt
+README.md
+```
+
+The installable `opensqcat/` folder includes the library source, complete
+documentation and license notice.
 
 Stable releases use version tags such as `v0.1.0`. Automatic nightly prereleases
 identify a date and commit; they are development builds with no stability
@@ -37,7 +51,8 @@ your program, include the library with:
 #include "opensqcat/opensqcat.nvgt"
 ```
 
-Keep the whole folder together. No separate build step is required.
+Keep the whole folder together, including `LICENSE` and `docs/`, when copying or
+redistributing the library. No separate build step is required.
 
 ### Global installation
 
@@ -55,10 +70,11 @@ wrapper's relative include without changes to its include configuration.
 
 ### Using the source repository
 
-The repository keeps the library in `src/`. Copy that directory into your
-project or NVGT include directory and rename the copy to `opensqcat/`, then follow
-the corresponding installation instructions above. The library is written
-entirely in NVGT and requires no compilation before use.
+The repository keeps the library source in `src/`, documentation in `doc/` and
+the license at the root. Copy `src/` to the destination as `opensqcat/`, copy
+`LICENSE` into that folder, and copy `doc/` into it as `docs/`. Then follow the
+corresponding project or global installation instructions above. The release ZIP
+already assembles this layout. No separate library compilation is required.
 
 ## Quick start
 
@@ -119,3 +135,5 @@ and advanced developer documentation. It is included in every release.
 ## License
 
 OpenSQCat is distributed under the zlib license. See [LICENSE](LICENSE).
+The installable library folder carries the complete notice; retain it when
+redistributing the library source.

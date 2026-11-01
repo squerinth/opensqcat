@@ -33,14 +33,20 @@ try {
 	if (-not (Test-Path -LiteralPath (Join-Path $inputRoot "$libraryDirectory/opensqcat.nvgt") -PathType Leaf)) {
 		throw 'Cannot find repository source or release library folder.'
 	}
+	$documentationDirectory = if ($libraryDirectory -eq 'src') { 'doc' } else { 'opensqcat/docs' }
+	$licensePath = Join-Path $inputRoot $(if ($libraryDirectory -eq 'src') { 'LICENSE' } else { 'opensqcat/LICENSE' })
 	# Execute a standalone copy. Every include and fixture must travel with it.
-	foreach ($directory in @($libraryDirectory, 'examples', 'doc')) {
+	foreach ($directory in @($libraryDirectory, 'examples')) {
 		Copy-Item -LiteralPath (Join-Path $inputRoot $directory) -Destination $packageRoot -Recurse
+	}
+	if ($libraryDirectory -eq 'src') {
+		Copy-Item -LiteralPath (Join-Path $inputRoot 'doc') -Destination $packageRoot -Recurse
+		Copy-Item -LiteralPath $licensePath -Destination $packageRoot
 	}
 	foreach ($directory in @('tests', 'tools')) {
 		Copy-Item -LiteralPath (Join-Path $projectRoot $directory) -Destination $packageRoot -Recurse
 	}
-	foreach ($file in @('README.md', 'LICENSE')) {
+	foreach ($file in @('README.md')) {
 		Copy-Item -LiteralPath (Join-Path $inputRoot $file) -Destination $packageRoot
 	}
 	foreach ($file in @('CONTRIBUTING.md', 'CHANGELOG.md', 'VERSION', '.gitignore')) {
@@ -52,6 +58,30 @@ try {
 	$fixtures = Join-Path $packageRoot 'tests/fixtures'
 	New-Item -ItemType Directory -Force -Path $fixtures | Out-Null
 	[IO.File]::WriteAllBytes((Join-Path $fixtures 'invalid_utf8.sqcat'), [byte[]](107, 61, 255, 10))
+
+	function Copy-LibraryInstallation([string]$Destination) {
+		Copy-Item -LiteralPath (Join-Path $inputRoot $libraryDirectory) -Destination $Destination -Recurse
+		if ($libraryDirectory -eq 'src') {
+			Copy-Item -LiteralPath $licensePath -Destination $Destination
+			Copy-Item -LiteralPath (Join-Path $inputRoot 'doc') -Destination (Join-Path $Destination 'docs') -Recurse
+		}
+		if ((Get-FileHash -LiteralPath $licensePath).Hash -cne (Get-FileHash -LiteralPath (Join-Path $Destination 'LICENSE')).Hash) { throw 'Installation lost or altered the license notice.' }
+		$docRoot = [IO.Path]::GetFullPath((Join-Path $inputRoot $documentationDirectory)).TrimEnd('\') + '\'
+		$installationPrefix = [IO.Path]::GetFullPath($Destination).TrimEnd('\') + '\'
+		foreach ($document in Get-ChildItem -LiteralPath $docRoot -File -Recurse) {
+			$copied = Join-Path $Destination ('docs/' + $document.FullName.Substring($docRoot.Length))
+			if (-not (Test-Path -LiteralPath $copied -PathType Leaf) -or (Get-FileHash -LiteralPath $document.FullName).Hash -cne (Get-FileHash -LiteralPath $copied).Hash) { throw 'Installation lost or altered documentation.' }
+			if ($document.Extension -eq '.md') {
+				foreach ($link in [regex]::Matches([IO.File]::ReadAllText($copied), '\[[^\]]*\]\(([^)]+)\)')) {
+					$target = $link.Groups[1].Value
+					if ($target -match '^https?://') { continue }
+					$localTarget = $target.Split('#', 2)[0]
+					$resolved = if ($localTarget.Length -eq 0) { $copied } else { [IO.Path]::GetFullPath((Join-Path (Split-Path $copied -Parent) $localTarget)) }
+					if (-not $resolved.StartsWith($installationPrefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $resolved -PathType Leaf)) { throw "Installed documentation depends on a missing or external file: $target" }
+				}
+			}
+		}
+	}
 
 	function Test-DocumentationProgram([string]$DocumentPath, [string]$WorkingDirectory, [string]$Compiler, [switch]$GlobalInclude) {
 		$document = Get-Content -LiteralPath $DocumentPath -Raw -Encoding UTF8
@@ -69,7 +99,7 @@ try {
 		if ($GlobalInclude) {
 			$program = $program.Replace('#include "opensqcat/opensqcat.nvgt"', '#include "opensqcat.nvgt"')
 		} else {
-			Copy-Item -LiteralPath (Join-Path $inputRoot $libraryDirectory) -Destination (Join-Path $WorkingDirectory 'opensqcat') -Recurse
+			Copy-LibraryInstallation (Join-Path $WorkingDirectory 'opensqcat')
 		}
 		$programPath = Join-Path $WorkingDirectory 'main.nvgt'
 		[IO.File]::WriteAllText($programPath, $program, $utf8)
@@ -109,7 +139,7 @@ try {
 		throw "OpenSQCat example failed (exit $LASTEXITCODE). Rerun with -KeepArtifacts to retain diagnostics."
 	}
 	$exampleOutput | Write-Output
-	$liveTutorial = Get-Content -LiteralPath (Join-Path $packageRoot 'doc/tutorials/live-values.md') -Raw -Encoding UTF8
+	$liveTutorial = Get-Content -LiteralPath (Join-Path $packageRoot "$documentationDirectory/tutorials/live-values.md") -Raw -Encoding UTF8
 	$liveExpected = [regex]::Match($liveTutorial, '(?s)```text\r?\n(.*?)```')
 	if (-not $liveExpected.Success -or ($exampleOutput -join "`n") -cne ($liveExpected.Groups[1].Value -replace '\r\n', "`n").TrimEnd("`n")) {
 		throw 'Console example output differs from the live-values tutorial.'
@@ -122,7 +152,7 @@ try {
 		throw 'VERSION, README version and changelog release heading must agree.'
 	}
 	Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $packageRoot 'readme-project') $NvgtPath
-	Test-DocumentationProgram (Join-Path $packageRoot 'doc/tutorials/first-catalog.md') (Join-Path $packageRoot 'tutorial-project') $NvgtPath
+	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/tutorials/first-catalog.md") (Join-Path $packageRoot 'tutorial-project') $NvgtPath
 
 	Write-Output 'PASS: project installation; README and tutorial outputs'
 	if ($CheckGlobalInstallation) {
@@ -133,7 +163,7 @@ try {
 		New-Item -ItemType Directory -Force -Path $engineIncludes | Out-Null
 		Copy-Item -LiteralPath $NvgtPath -Destination (Join-Path $engineRoot 'nvgt.exe')
 		Copy-Item -LiteralPath (Join-Path (Split-Path $NvgtPath -Parent) 'lib') -Destination $engineRoot -Recurse
-		Copy-Item -LiteralPath (Join-Path $inputRoot $libraryDirectory) -Destination (Join-Path $engineIncludes 'opensqcat') -Recurse
+		Copy-LibraryInstallation (Join-Path $engineIncludes 'opensqcat')
 		$releaseWrapper = Join-Path $inputRoot 'opensqcat.nvgt'
 		$globalWrapper = Join-Path $engineIncludes 'opensqcat.nvgt'
 		if (Test-Path -LiteralPath $releaseWrapper -PathType Leaf) {

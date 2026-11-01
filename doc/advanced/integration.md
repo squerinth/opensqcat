@@ -31,7 +31,7 @@ Fields are resolved in this order:
 
 A present empty string, zero or false value stops the search. General setters
 store copies; update them when application state changes. For live values, use
-the provider or resolver pattern in the [console example](../../examples/messages.nvgt).
+the provider or resolver pattern in the [live-values tutorial](../tutorials/live-values.md).
 Provider results are cached for one formatting operation, including references.
 
 Dictionary strings are text. Plain dictionary numbers and booleans use NVGT's

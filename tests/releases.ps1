@@ -46,11 +46,13 @@ try {
 	try {
 		$entries = @($zip.Entries.FullName)
 		foreach ($entry in $entries) {
-			if ($entry -notmatch '^(opensqcat/|examples/|doc/|opensqcat\.nvgt$|README\.md$|LICENSE$)') {
+			if ($entry -notmatch '^(opensqcat/(docs/|opensqcat/|opensqcat\.nvgt$|LICENSE$)|examples/|opensqcat\.nvgt$|README\.md$)') {
 				throw "Forbidden release content or intermediate directory: $entry"
 			}
 		}
-		foreach ($required in @('opensqcat/opensqcat.nvgt', 'opensqcat.nvgt', 'README.md', 'LICENSE', 'examples/messages.nvgt', 'doc/api/README.md', 'doc/tutorials/README.md', 'doc/advanced/README.md')) {
+		$roots = @($entries | ForEach-Object { $_.Split('/')[0] } | Sort-Object -Unique)
+		if ($roots.Count -ne 4 -or @($roots | Where-Object { $_ -notin @('opensqcat', 'examples', 'opensqcat.nvgt', 'README.md') }).Count) { throw 'ZIP must contain exactly the four distribution entries.' }
+		foreach ($required in @('opensqcat/opensqcat.nvgt', 'opensqcat.nvgt', 'README.md', 'opensqcat/LICENSE', 'examples/messages.nvgt', 'opensqcat/docs/README.md', 'opensqcat/docs/api/README.md', 'opensqcat/docs/tutorials/README.md', 'opensqcat/docs/advanced/README.md')) {
 			if ($required -notin $entries) { throw "Release omits root content: $required" }
 		}
 	} finally { $zip.Dispose() }
@@ -87,6 +89,18 @@ try {
 	Write-Output 'PASS: omitted documentation rejected; previous release preserved'
 	if (-not $KeepArtifacts -and @(Get-ChildItem -LiteralPath $buildDirectory -Directory).Count -ne 0) { throw 'Failed release retained temporary directories.' }
 
+	[IO.File]::WriteAllText((Join-Path $probe '.gitattributes'), "/LICENSE export-ignore`n", $utf8)
+	& git -C $probe add .gitattributes
+	& git -C $probe -c user.name='Release verification' -c user.email='verification@example.invalid' -c commit.gpgsign=false commit --quiet -m 'Probe omitted license'
+	if ($LASTEXITCODE -ne 0) { throw 'Cannot prepare omitted-license test.' }
+	$ErrorActionPreference = 'Continue'
+	$failure = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $tool @retentionArguments -SkipGlobalInstallationCheck -NvgtPath $NvgtPath -Revision HEAD -BuildDirectory $buildDirectory 2>&1)
+	$failedExit = $LASTEXITCODE
+	$ErrorActionPreference = 'Stop'
+	if ($failedExit -eq 0 -or ($failure -join "`n") -notmatch 'Release omits license') { throw 'Missing license was not rejected.' }
+	if ((Get-FileHash -LiteralPath $archive).Hash -cne $firstHash) { throw 'License failure replaced a verified release.' }
+	Write-Output 'PASS: omitted license rejected; previous release preserved'
+
 	# Default mode must include local documentation changes without requiring a commit.
 	$workingDocument = Join-Path $probe 'doc/advanced/README.md'
 	[IO.File]::AppendAllText($workingDocument, "`nWorking-tree release fixture.`n", $utf8)
@@ -94,7 +108,7 @@ try {
 	if ($LASTEXITCODE -ne 0) { throw 'Default release failed in a fresh PowerShell process.' }
 	$zip = [IO.Compression.ZipFile]::OpenRead($archive)
 	try {
-		$entry = $zip.GetEntry('doc/advanced/README.md')
+		$entry = $zip.GetEntry('opensqcat/docs/advanced/README.md')
 		$reader = [IO.StreamReader]::new($entry.Open())
 		try { $workingText = $reader.ReadToEnd() } finally { $reader.Dispose() }
 		if (-not $workingText.Contains('Working-tree release fixture.')) { throw 'Default release omitted local changes.' }
