@@ -8,6 +8,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'temporary.ps1')
+. (Join-Path $PSScriptRoot 'versioning.ps1')
 $projectRoot = Split-Path $PSScriptRoot -Parent
 if ([string]::IsNullOrWhiteSpace($NvgtPath)) {
 	$NvgtPath = 'nvgt.exe'
@@ -145,12 +146,7 @@ try {
 		throw 'Console example output differs from the live-values tutorial.'
 	}
 	# Test the README's catalog and program together, without example fixtures.
-	$readme = Get-Content -LiteralPath (Join-Path $packageRoot 'README.md') -Raw -Encoding UTF8
-	$version = (Get-Content -LiteralPath (Join-Path $packageRoot 'VERSION') -Raw -Encoding UTF8).Trim()
-	$changelog = Get-Content -LiteralPath (Join-Path $packageRoot 'CHANGELOG.md') -Raw -Encoding UTF8
-	if ($version -notmatch '^\d+\.\d+\.\d+$' -or -not $readme.Contains("Version **$version**") -or $changelog -notmatch "(?m)^## $([regex]::Escape($version))\r?$") {
-		throw 'VERSION, README version and changelog release heading must agree.'
-	}
+	$null = Get-SourceVersion $packageRoot
 	Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $packageRoot 'readme-project') $NvgtPath
 	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/tutorials/first-catalog.md") (Join-Path $packageRoot 'tutorial-project') $NvgtPath
 

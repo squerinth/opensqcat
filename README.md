@@ -2,7 +2,7 @@
 
 **Text localization and bounded templates for NVGT.**
 
-Version **0.1.0** · SQCat **1** · zlib license
+SQCat **1** · zlib license
 
 OpenSQCat reads UTF-8 `.sqcat` catalogs and formats messages using values from
 your application. It supports named catalogs, message references, conditional
@@ -38,9 +38,14 @@ README.md
 The installable `opensqcat/` folder includes the library source, complete
 documentation and license notice.
 
-Stable releases use version tags such as `v0.1.0`. Automatic nightly prereleases
+Stable releases use numbered version tags. Automatic nightly prereleases
 identify a date and commit; they are development builds with no stability
 guarantee. Choose a stable release for normal use.
+
+Repository source may contain unreleased changes. The version targeted by
+development does not mean that a stable release with that number exists. Check
+the [latest stable release](https://github.com/squerinth/opensqcat/releases/latest)
+for published downloads; if none exists yet, only development builds are available.
 
 ### Project installation
 

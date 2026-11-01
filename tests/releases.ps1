@@ -70,10 +70,7 @@ try {
 		if ($LASTEXITCODE -ne 0) { throw "Workspace contents are not ignored: $workspace" }
 	}
 	Write-Output 'PASS: release/ output, exact allowlist, checksums, repeatability and Git ignores'
-	$verificationLog = Join-Path $probe 'build/verification.log'
-	New-Item -ItemType Directory -Force -Path (Split-Path $verificationLog -Parent) | Out-Null
-	[IO.File]::WriteAllText($verificationLog, ($results -join "`n"), $utf8)
-	& (Join-Path $PSScriptRoot 'publication.ps1') -FixtureRoot $probe -VerificationLog $verificationLog
+	& (Join-Path $PSScriptRoot 'publication.ps1') -FixtureRoot $probe -NvgtPath $NvgtPath
 
 	# A failed release must not replace a previously verified artifact.
 	[IO.File]::WriteAllText((Join-Path $probe '.gitattributes'), "/doc/tutorials/first-catalog.md export-ignore`n", $utf8)

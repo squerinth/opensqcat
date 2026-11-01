@@ -3,11 +3,13 @@ param(
 	[string]$NvgtPath = $env:NVGT_EXE,
 	[string]$Revision,
 	[string]$BuildDirectory,
+	[ValidateSet('Development', 'Nightly', 'Stable')][string]$Kind = 'Development',
 	[switch]$SkipGlobalInstallationCheck,
 	[switch]$KeepArtifacts
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'temporary.ps1')
+. (Join-Path $PSScriptRoot 'versioning.ps1')
 $projectRoot = Split-Path $PSScriptRoot -Parent
 if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
 	$BuildDirectory = Join-Path $projectRoot 'build'
@@ -45,8 +47,9 @@ try {
 		$archiveTime = [DateTimeOffset]::Parse($commitTime.Trim()).ToUniversalTime()
 		$sourceDescription = "commit $commit"
 	}
-	$version = (Get-Content -LiteralPath (Join-Path $snapshotRoot 'VERSION') -Raw -Encoding UTF8).Trim()
-	if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION must contain major.minor.patch.' }
+	$version = Get-SourceVersion $snapshotRoot
+	if ($Kind -ne 'Development' -and [string]::IsNullOrWhiteSpace($Revision)) { throw 'Nightly and stable packages require a committed -Revision.' }
+	if ($Kind -eq 'Stable') { $null = Get-StableReleaseNotes $snapshotRoot $version }
 	if (-not (Test-Path -LiteralPath (Join-Path $snapshotRoot 'LICENSE') -PathType Leaf)) { throw 'Release omits license: LICENSE' }
 	$releaseName = "opensqcat-$version"
 	$releaseRoot = Join-Path $staging $releaseName
@@ -62,6 +65,15 @@ try {
 	$utf8 = [Text.UTF8Encoding]::new($false)
 	$readme = [IO.File]::ReadAllText((Join-Path $snapshotRoot 'README.md'))
 	$readme = $readme.Replace('](doc/', '](opensqcat/docs/').Replace('](LICENSE)', '](opensqcat/LICENSE)')
+	$buildDescription = switch ($Kind) {
+		'Nightly' {
+			$stamp = $archiveTime.ToString("yyyyMMdd'T'HHmmss'Z'")
+			"Nightly build targeting **$version**: ``nightly-$stamp-$($commit.Substring(0, 12))``. Stability is not guaranteed."
+		}
+		'Stable' { "Stable release **$version** (``v$version``)." }
+		default { "Development snapshot targeting **$version**. This is not a stable release." }
+	}
+	$readme = $readme.TrimEnd() + "`n`n## Build information`n`n$buildDescription`n`nSource: $sourceDescription.`n"
 	[IO.File]::WriteAllText((Join-Path $releaseRoot 'README.md'), $readme, $utf8)
 	foreach ($script in @('examples/messages.nvgt')) {
 		$path = Join-Path $releaseRoot $script
@@ -124,6 +136,7 @@ try {
 	Copy-Item -LiteralPath $archive -Destination $finishedArchive -Force
 	[IO.File]::WriteAllText("$finishedArchive.sha256", "$checksum  $([IO.Path]::GetFileName($finishedArchive))`n", $utf8)
 	Write-Output "Verified OpenSQCat $version from $sourceDescription"
+	Write-Output "Package kind: $Kind"
 	Write-Output "Archive: $finishedArchive"
 	Write-Output "SHA256: $checksum"
 } finally {
