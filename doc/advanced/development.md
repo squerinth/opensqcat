@@ -35,7 +35,7 @@ reports the compiler version and commit used for the check.
 
 Verification runs the contracts, console example, README program and tutorial
 program in a standalone copy. It compares their outputs with the documented
-results and checks version consistency, local documentation links, heading
+results and checks the target version syntax, local documentation links, heading
 fragments and source includes. External URLs are not checked.
 
 Project installation is checked on every run. After changing includes, the global
@@ -99,9 +99,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/release.ps1 -NvgtPath 
 ```
 
 The default packages the current working files. `-Revision <ref>` selects a Git
-commit or tag instead. Keep `VERSION`, the README version and `CHANGELOG.md`
-aligned. Without a supplied compiler, the packager obtains the current NVGT
+commit or tag instead. `VERSION` is the target version of the code, not a claim
+that this stable version has been published. The changelog may keep development
+changes under `Unreleased` while retaining older release sections. The README
+links to available releases without maintaining a separate version number.
+Without a supplied compiler, the packager obtains the current NVGT
 development build automatically.
+
+Local packages default to `-Kind Development`. CI selects `Nightly` for main
+pushes and `Stable` for version tags. Nightly and stable packages require a
+committed `-Revision`; only stable packages require a nonempty changelog section
+matching `VERSION`. The stable tag must also match that version. Every package
+adds generated build information to its README, identifying its channel and
+source. A nightly targeting a future version remains a prerelease.
 
 The resulting `release/opensqcat-<version>.zip` has exactly four top-level
 entries: `opensqcat/`, `examples/`, `opensqcat.nvgt` and `README.md`. The installable
@@ -131,12 +141,15 @@ that check enabled. Test workspaces are removed by default.
 
 ## Continuous integration
 
-The GitHub Actions workflow runs on pull requests, pushes to `main`, version-tag
+The GitHub Actions workflow runs on pull requests targeting `main`, pushes to
+`dev` and `main`, version-tag
 pushes and manual requests. It uses Windows and the latest NVGT development build
 to run the verification and tool regression suites against an extracted package.
 Consult the run's logs for compiler identity and failure diagnostics.
 
 Successful pushes to `main` publish development prereleases without a stability
-guarantee. Stable releases use version tags matching `VERSION`. Pull requests and
-manual verification runs do not publish. Downloadable packages include the ZIP
+guarantee. Stable releases use version tags matching `VERSION` on commits already
+merged into `main`. Pushes to `dev`, pull requests and manual verification runs
+do not publish. The required `verify` check keeps its name across these events.
+Downloadable packages include the ZIP
 and checksum; GitHub's source archives use the repository layout instead.

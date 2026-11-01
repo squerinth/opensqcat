@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Verify development pushes and pull requests without publishing releases.
+- Identify development and nightly packages independently of stable release notes.
+
 ## 0.1.0
 
 Initial release of OpenSQCat for NVGT.

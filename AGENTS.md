@@ -12,7 +12,8 @@ OpenSQCat is an NVGT/AngelScript library for UTF-8 `.sqcat` localization catalog
 - `tools/get-nvgt.ps1` always resolves and extracts NVGT's Latest/Bleeding Edge Development Version; do not pin an NVGT version or commit. `tools/release.ps1` automatically stages and verifies the current files, or a Git commit selected with `-Revision`, then writes the finished archive under `release/`. A release contains only the library, examples, documentation and license. Tests, tools, agent files and repository metadata are excluded. `.github/workflows/verify.yml` runs this workflow in CI.
 - `.agent-work/` holds session-specific agent work and private maintainer guides. Only its empty `.gitkeep` is tracked to preserve the directory; every other file is ignored. Neither the library nor repository tools may require pre-existing artifacts in `build/`, `.agent-work/` or `release/`; required artifacts must be generated from source or downloaded tools. None of these directories or their placeholders belongs in release ZIPs.
 - Test and release scripts remove their temporary workspaces on success and failure. Retaining artifacts requires explicit `-KeepArtifacts`. NVGT setup maintains one reusable latest extraction and removes obsolete installer/extraction files; do not reintroduce unbounded per-run compiler copies on disk.
-- `.github/workflows/verify.yml` publishes one nightly prerelease for the final commit of each successful push to `main`, and a stable release for a pushed `v<version>` tag matching `VERSION`. Pull requests and manual runs only verify. Keep publication permissions in the separate publication job; nightlies must never be marked Latest.
+- `.github/workflows/verify.yml` publishes one nightly prerelease for the final commit of each successful push to `main`, and a stable release for a pushed `v<version>` tag matching `VERSION`. Pushes to `dev`, pull requests targeting `main` and manual runs only verify. Maintainer development uses `dev`; integration into protected `main` requires a pull request and the `verify` check. Stable tags must select commits already merged into `main`. Keep publication permissions in the separate publication job; nightlies must never be marked Latest.
+- `VERSION` is the code's target version. Development/nightly verification must not require a matching released changelog section or a manually maintained README version. Only stable publication requires matching tag, target version and nonempty changelog release notes. Source README links to available releases; package README build identity is generated for its channel.
 
 ## Internal Work and Official Documentation
 
@@ -45,7 +46,7 @@ Use the suite's `check()` and `expect()` helpers; group cases in `test_<behavior
 
 ## Commit & Pull Request Guidelines
 
-History currently contains only the initial commit, so no established commit convention exists. Use concise, imperative subjects describing the change. Pull requests should explain behavior changes, link relevant issues, and report the verification command and result, including the NVGT version used.
+Use concise, imperative commit subjects describing the change. Pull requests should explain behavior changes, link relevant issues, and report the verification command and result, including the NVGT version used.
 
 ## Architecture Boundaries
 
