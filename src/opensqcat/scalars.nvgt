@@ -1,191 +1,191 @@
 namespace opensqcat {
-    namespace detail {
-        enum value_kind {
-            missing_value, text_value, integer_value, unsigned_value,
-            number_value, boolean_value
-        }
+	namespace detail {
+		enum value_kind {
+			missing_value, text_value, integer_value, unsigned_value,
+			number_value, boolean_value
+		}
 
-        // Private evaluator representation; application providers use native var.
-        class value {
-            value_kind kind = missing_value;
-            string text;
-            int64 integer = 0;
-            uint64 unsigned_integer = 0;
-            double number = 0;
-            bool boolean = false;
+		// Private evaluator representation; application providers use native var.
+		class value {
+			value_kind kind = missing_value;
+			string text;
+			int64 integer = 0;
+			uint64 unsigned_integer = 0;
+			double number = 0;
+			bool boolean = false;
 
-            value() {
-            }
-            value(const string&in text) {
-                kind = text_value;
-                this.text = text;
-            }
-            value(int integer) {
-                kind = integer_value;
-                this.integer = integer;
-            }
-            value(int64 integer) {
-                kind = integer_value;
-                this.integer = integer;
-            }
-            value(uint64 integer) {
-                kind = unsigned_value;
-                unsigned_integer = integer;
-            }
-            value(double number) {
-                kind = number_value;
-                this.number = number;
-            }
-            value(bool boolean) {
-                kind = boolean_value;
-                this.boolean = boolean;
-            }
-            bool numeric() const {
-                return kind == integer_value || kind == unsigned_value || kind == number_value;
-            }
-            bool truth() const {
-                if (kind == text_value) {
-                    return text.length() > 0;
-                }
-                if (kind == integer_value) {
-                    return integer != 0;
-                }
-                if (kind == unsigned_value) {
-                    return unsigned_integer != 0;
-                }
-                if (kind == number_value) {
-                    return number != 0;
-                }
-                return kind == boolean_value && boolean;
-            }
-            string as_text() const {
-                if (kind == text_value) {
-                    return text;
-                }
-                if (kind == integer_value) {
-                    return "" + integer;
-                }
-                if (kind == unsigned_value) {
-                    return "" + unsigned_integer;
-                }
-                if (kind == number_value) {
-                    return "" + number;
-                }
-                if (kind == boolean_value) {
-                    return boolean ? "true" : "false";
-                }
-                return "";
-            }
-        }
+			value() {
+			}
+			value(const string&in text) {
+				kind = text_value;
+				this.text = text;
+			}
+			value(int integer) {
+				kind = integer_value;
+				this.integer = integer;
+			}
+			value(int64 integer) {
+				kind = integer_value;
+				this.integer = integer;
+			}
+			value(uint64 integer) {
+				kind = unsigned_value;
+				unsigned_integer = integer;
+			}
+			value(double number) {
+				kind = number_value;
+				this.number = number;
+			}
+			value(bool boolean) {
+				kind = boolean_value;
+				this.boolean = boolean;
+			}
+			bool numeric() const {
+				return kind == integer_value || kind == unsigned_value || kind == number_value;
+			}
+			bool truth() const {
+				if (kind == text_value) {
+					return text.length() > 0;
+				}
+				if (kind == integer_value) {
+					return integer != 0;
+				}
+				if (kind == unsigned_value) {
+					return unsigned_integer != 0;
+				}
+				if (kind == number_value) {
+					return number != 0;
+				}
+				return kind == boolean_value && boolean;
+			}
+			string as_text() const {
+				if (kind == text_value) {
+					return text;
+				}
+				if (kind == integer_value) {
+					return "" + integer;
+				}
+				if (kind == unsigned_value) {
+					return "" + unsigned_integer;
+				}
+				if (kind == number_value) {
+					return "" + number;
+				}
+				if (kind == boolean_value) {
+					return boolean ? "true" : "false";
+				}
+				return "";
+			}
+		}
 
-        value@ from_native(var@ source) {
-            if (source is null || source.empty) {
-                return null;
-            }
-            // NVGT boolean variants are also numeric. Test this flag first.
-            if (source.is_boolean) {
-                bool item = source;
-                return value(item);
-            }
-            if (source.is_string) {
-                string item = source;
-                return utf8valid(item, false) ? value(item) : null;
-            }
-            if (source.is_integer) {
-                if (source.is_signed) {
-                    int64 item = source;
-                    return value(item);
-                }
-                uint64 item = source;
-                return value(item);
-            }
-            if (source.is_numeric) {
-                double item = source;
-                return is_finite(item) ? value(item) : null;
-            }
-            return null;
-        }
+		value@ from_native(var@ source) {
+			if (source is null || source.empty) {
+				return null;
+			}
+			// NVGT boolean variants are also numeric. Test this flag first.
+			if (source.is_boolean) {
+				bool item = source;
+				return value(item);
+			}
+			if (source.is_string) {
+				string item = source;
+				return utf8valid(item, false) ? value(item) : null;
+			}
+			if (source.is_integer) {
+				if (source.is_signed) {
+					int64 item = source;
+					return value(item);
+				}
+				uint64 item = source;
+				return value(item);
+			}
+			if (source.is_numeric) {
+				double item = source;
+				return is_finite(item) ? value(item) : null;
+			}
+			return null;
+		}
 
-        value@ integer_literal(const string&in text) {
-            bool negative = text.starts_with("-");
-            uint start = negative ? 1 : 0;
-            uint64 limit = negative ? uint64(9223372036854775808) : uint64(18446744073709551615);
-            uint64 magnitude = 0;
-            for (uint i = start; i < text.length(); i++) {
-                uint digit = uint("0123456789".find(text.substr(i, 1)));
-                if (digit > 9 || magnitude > (limit - digit) / 10) {
-                    return null;
-                }
-                magnitude = magnitude * 10 + digit;
-            }
-            if (negative) {
-                return magnitude == 0 ? value(int64(0)) : value(-int64(magnitude - 1) - 1);
-            }
-            if (magnitude <= uint64(9223372036854775807)) {
-                return value(int64(magnitude));
-            }
-            return value(magnitude);
-        }
+		value@ integer_literal(const string&in text) {
+			bool negative = text.starts_with("-");
+			uint start = negative ? 1 : 0;
+			uint64 limit = negative ? uint64(9223372036854775808) : uint64(18446744073709551615);
+			uint64 magnitude = 0;
+			for (uint i = start; i < text.length(); i++) {
+				uint digit = uint("0123456789".find(text.substr(i, 1)));
+				if (digit > 9 || magnitude > (limit - digit) / 10) {
+					return null;
+				}
+				magnitude = magnitude * 10 + digit;
+			}
+			if (negative) {
+				return magnitude == 0 ? value(int64(0)) : value(-int64(magnitude - 1) - 1);
+			}
+			if (magnitude <= uint64(9223372036854775807)) {
+				return value(int64(magnitude));
+			}
+			return value(magnitude);
+		}
 
-        int signed_real_order(int64 integer, double real) {
-            if (real >= 9223372036854775808.0) {
-                return -1;
-            }
-            if (real < -9223372036854775808.0) {
-                return 1;
-            }
-            int64 truncated = int64(real);
-            if (integer < truncated) {
-                return -1;
-            }
-            if (integer > truncated) {
-                return 1;
-            }
-            return double(truncated) < real ? -1 : (double(truncated) > real ? 1 : 0);
-        }
-        int unsigned_real_order(uint64 integer, double real) {
-            if (real < 0) {
-                return 1;
-            }
-            if (real >= 18446744073709551616.0) {
-                return -1;
-            }
-            uint64 truncated = uint64(real);
-            if (integer < truncated) {
-                return -1;
-            }
-            if (integer > truncated) {
-                return 1;
-            }
-            return double(truncated) < real ? -1 : (double(truncated) > real ? 1 : 0);
-        }
-        int numeric_order(value@ left, value@ right) {
-            if (left.kind == number_value) {
-                if (right.kind == integer_value) {
-                    return -signed_real_order(right.integer, left.number);
-                }
-                if (right.kind == unsigned_value) {
-                    return -unsigned_real_order(right.unsigned_integer, left.number);
-                }
-                return left.number < right.number ? -1 : (left.number > right.number ? 1 : 0);
-            }
-            if (right.kind == number_value) {
-                return left.kind == integer_value
-                    ? signed_real_order(left.integer, right.number)
-                    : unsigned_real_order(left.unsigned_integer, right.number);
-            }
-            if (left.kind == integer_value && right.kind == integer_value) {
-                return left.integer < right.integer ? -1 : (left.integer > right.integer ? 1 : 0);
-            }
-            if (left.kind == integer_value && left.integer < 0) {
-                return -1;
-            }
-            if (right.kind == integer_value && right.integer < 0) {
-                return 1;
-            }
-            uint64 first = left.kind == integer_value ? uint64(left.integer) : left.unsigned_integer;
-            uint64 second = right.kind == integer_value ? uint64(right.integer) : right.unsigned_integer;
-            return first < second ? -1 : (first > second ? 1 : 0);
-        }
-    }
+		int signed_real_order(int64 integer, double real) {
+			if (real >= 9223372036854775808.0) {
+				return -1;
+			}
+			if (real < -9223372036854775808.0) {
+				return 1;
+			}
+			int64 truncated = int64(real);
+			if (integer < truncated) {
+				return -1;
+			}
+			if (integer > truncated) {
+				return 1;
+			}
+			return double(truncated) < real ? -1 : (double(truncated) > real ? 1 : 0);
+		}
+		int unsigned_real_order(uint64 integer, double real) {
+			if (real < 0) {
+				return 1;
+			}
+			if (real >= 18446744073709551616.0) {
+				return -1;
+			}
+			uint64 truncated = uint64(real);
+			if (integer < truncated) {
+				return -1;
+			}
+			if (integer > truncated) {
+				return 1;
+			}
+			return double(truncated) < real ? -1 : (double(truncated) > real ? 1 : 0);
+		}
+		int numeric_order(value@ left, value@ right) {
+			if (left.kind == number_value) {
+				if (right.kind == integer_value) {
+					return -signed_real_order(right.integer, left.number);
+				}
+				if (right.kind == unsigned_value) {
+					return -unsigned_real_order(right.unsigned_integer, left.number);
+				}
+				return left.number < right.number ? -1 : (left.number > right.number ? 1 : 0);
+			}
+			if (right.kind == number_value) {
+				return left.kind == integer_value
+					? signed_real_order(left.integer, right.number)
+					: unsigned_real_order(left.unsigned_integer, right.number);
+			}
+			if (left.kind == integer_value && right.kind == integer_value) {
+				return left.integer < right.integer ? -1 : (left.integer > right.integer ? 1 : 0);
+			}
+			if (left.kind == integer_value && left.integer < 0) {
+				return -1;
+			}
+			if (right.kind == integer_value && right.integer < 0) {
+				return 1;
+			}
+			uint64 first = left.kind == integer_value ? uint64(left.integer) : left.unsigned_integer;
+			uint64 second = right.kind == integer_value ? uint64(right.integer) : right.unsigned_integer;
+			return first < second ? -1 : (first > second ? 1 : 0);
+		}
+	}
 }

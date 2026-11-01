@@ -6,8 +6,23 @@ OpenSQCat implements SQCat 1 for NVGT and AngelScript. The rules below define th
 file format and expression language; implementation-specific API and resource
 limits are linked separately.
 
-A catalog is a case-sensitive map of message keys to text templates. File names,
-directories and extensions have no semantic effect on the library.
+## Contents
+
+- [File structure](#file-structure)
+- [Version declarations](#version-declarations)
+- [Directives](#directives)
+- [Loading stages](#loading-stages)
+- [Text and expressions](#text-and-expressions)
+- [Fields and references](#fields-and-references)
+- [Expressions](#expressions)
+- [Joining optional fragments](#joining-optional-fragments)
+- [Numeric values](#numeric-values)
+- [Grammar](#grammar)
+
+A catalog is a case-sensitive map of message keys to text templates. Its contents
+are interpreted independently of its file name or directory. OpenSQCat's
+`translator.load(path)` uses the file name to choose a catalog registration name
+when the caller omits an explicit name; see [catalog loading](../api/translator.md#loading-and-raw-lookup).
 
 ## File structure
 
@@ -195,7 +210,7 @@ All included messages share the field cache and evaluation budgets.
 **OpenSQCat:** the first installed catalog is the default. `load(path)` infers its
 name from the filename without `.sqcat`; explicit names override that inference.
 Caller APIs select roots with `get_from(catalog_name, key)`, keeping keys literal.
-See [catalog management](api/translator.md#catalog-management).
+See [catalog management](../api/translator.md#catalog-management).
 
 ## Expressions
 
@@ -262,12 +277,6 @@ field cache, evaluation depth/step limits and cumulative generated-text budget.
 A join in an unselected branch is not evaluated. Output produced elsewhere in
 the template never affects its separator decisions.
 
-This operation is inspired by separated string composition, not a complete copy
-of Python's API. Python's [`str.join`](https://docs.python.org/3/library/stdtypes.html#str.join)
-takes an iterable of strings, retains empty strings and requires explicit
-conversion of non-string items. OpenSQCat uses variadic scalar expressions and
-omits absent/empty fragments specifically to support optional message parts.
-
 ## Numeric values
 
 Integer literals without a decimal point or exponent retain exact 64-bit
@@ -284,7 +293,7 @@ literals that overflow or underflow to zero are rejected. Decimal conversion use
 NVGT's `parse_double`; its rounding can differ from AngelScript source literals,
 including near 64-bit boundaries. Real values are approximate; use integer
 literals or typed integer fields for exact counts and identifiers. Plain numeric
-dictionary entries also undergo double conversion; see [field values](api/values.md).
+dictionary entries also undergo double conversion; see [field values](../api/values.md).
 
 Integers format as decimal digits; real numbers use NVGT's double-to-string
 conversion. Neither applies locale-specific currency or numeric formatting.
@@ -317,4 +326,4 @@ The name `join` remains usable as a field when not followed by `(`. There are no
 arbitrary function calls, property access, assignments, arithmetic,
 concatenation operators, loops, file operations or format specifiers in expressions.
 Compose output by placing literal text, fields and references next to each other.
-Evaluation limits are documented in [diagnostics and limits](api/diagnostics.md).
+Evaluation limits are documented in [diagnostics and limits](../api/diagnostics.md).

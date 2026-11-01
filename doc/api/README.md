@@ -1,8 +1,14 @@
 # API reference
 
-OpenSQCat implements [SQCat 1](../format.md). Include `src/opensqcat.nvgt`. All supported symbols are in the `opensqcat`
-namespace. The `opensqcat::detail` namespace and `catalog.snapshot()` are
-implementation details, not application API.
+OpenSQCat implements [SQCat 1](../advanced/format.md). The library entry point is
+`opensqcat/opensqcat.nvgt` for a project installation, or `opensqcat.nvgt` through
+the global wrapper. Supported types and members are documented here in the
+`opensqcat` namespace. Undocumented members and the `opensqcat::detail` namespace
+are implementation details and are not covered by public compatibility guarantees.
+
+This section documents public contracts. Step-by-step examples belong to the
+[tutorials](../tutorials/README.md); design and integration guidance belongs to
+the [advanced documentation](../advanced/README.md).
 
 | Type | Purpose |
 | --- | --- |
@@ -16,7 +22,6 @@ implementation details, not application API.
 
 Instances are intended for sequential use, not concurrent mutation. Providers may
 replace configuration during a format operation: the current operation retains
-its catalog, dictionaries and provider snapshot; later operations see the change.
+the selected templates, copied fields and provider handle; later operations see
+configuration changes. Application state read by a provider is not snapshotted.
 Callbacks must return promptly and manage their own external state and lifetime.
-
-No type in this API owns application data such as players, accounts or documents.

@@ -1,387 +1,379 @@
 namespace opensqcat {
-    namespace detail {
-        enum node_kind {
-            literal_node, field_node, reference_node, not_node,
-            and_node, or_node, compare_node, conditional_node, join_node
-        }
+	namespace detail {
+		enum node_kind {
+			literal_node, field_node, reference_node, not_node,
+			and_node, or_node, compare_node, conditional_node, join_node
+		}
 
-        class node {
-            node_kind kind;
-            uint position;
-            string text;
-            string catalog_name;
-            value@ scalar;
-            node@ left;
-            node@ right;
-            node@ alternative;
-            node@[] arguments;
+		class node {
+			node_kind kind;
+			uint position;
+			string text;
+			string catalog_name;
+			value@ scalar;
+			node@ left;
+			node@ right;
+			node@ alternative;
+			node@[] arguments;
 
-            node(node_kind kind, uint position) {
-                this.kind = kind;
-                this.position = position;
-            }
-        }
+			node(node_kind kind, uint position) {
+				this.kind = kind;
+				this.position = position;
+			}
+		}
 
-        class program {
-            node@[] parts;
-        }
+		class program {
+			node@[] parts;
+		}
 
-        bool letter(const string&in character) {
-            return character.length() == 1
-                && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_".find(character) >= 0;
-        }
-        bool digit(const string&in character) {
-            return character.length() == 1 && "0123456789".find(character) >= 0;
-        }
+		bool letter(const string&in character) {
+			return character.length() == 1
+				&& "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_".find(character) >= 0;
+		}
+		bool digit(const string&in character) {
+			return character.length() == 1 && "0123456789".find(character) >= 0;
+		}
 
-        class parser {
-            private string source;
-            private uint offset = 0;
-            private uint nodes = 0;
-            string error;
-            uint error_column = 0;
+		class parser {
+			private string source;
+			private uint offset = 0;
+			private uint nodes = 0;
+			string error;
+			uint error_column = 0;
 
-            parser(const string&in source) {
-                this.source = source;
-            }
-            private void fail(const string&in reason) {
-                if (error.length() == 0) {
-                    error = reason;
-                    error_column = offset + 1;
-                }
-            }
-            private node@ make(node_kind kind, uint position) {
-                nodes++;
-                if (nodes > max_nodes) {
-                    fail("template node limit exceeded");
-                }
-                return node(kind, position);
-            }
-            private string character() const {
-                return source.substr(offset, 1);
-            }
-            private void whitespace() {
-                while (offset < source.length()
-                    && " \t\r\n".find(character()) >= 0) {
-                    offset++;
-                }
-            }
-            private bool take(const string&in token) {
-                whitespace();
-                if (source.substr(offset, token.length()) != token) {
-                    return false;
-                }
-                offset += token.length();
-                return true;
-            }
-            private bool word(const string&in token) {
-                whitespace();
-                if (source.substr(offset, token.length()) != token) {
-                    return false;
-                }
-                string next = source.substr(offset + token.length(), 1);
-                if (letter(next) || digit(next) || next == ".") {
-                    return false;
-                }
-                offset += token.length();
-                return true;
-            }
-            private string identifier() {
-                whitespace();
-                uint start = offset;
-                if (!letter(character())) {
-                    fail("expected identifier");
-                    return "";
-                }
-                offset++;
-                while (offset < source.length()) {
-                    string current = character();
-                    if (letter(current) || digit(current)) {
-                        offset++;
-                    }
-                    else if (current == "." && letter(source.substr(offset + 1, 1))) {
-                        offset += 2;
-                    }
-                    else {
-                        break;
-                    }
-                }
-                return source.substr(start, offset - start);
-            }
-            private string quoted() {
-                whitespace();
-                string quote = character();
-                offset++;
-                string result;
-                while (offset < source.length()) {
-                    string current = character();
-                    offset++;
-                    if (current == quote) {
-                        return result;
-                    }
-                    if (current == "\\") {
-                        if (offset >= source.length()) {
-                            break;
-                        }
-                        current = character();
-                        offset++;
-                        if (current == "n") {
-                            current = "\n";
-                        }
-                        else if (current == "r") {
-                            current = "\r";
-                        }
-                        else if (current == "t") {
-                            current = "\t";
-                        }
-                        else if (current != "\\" && current != "\"" && current != "'") {
-                            fail("unknown string escape");
-                            return "";
-                        }
-                    }
-                    result += current;
-                }
-                fail("unterminated string literal");
-                return "";
-            }
-            private string reference_component() {
-                whitespace();
-                if (character() == "\"" || character() == "'") {
-                    return quoted();
-                }
-                return identifier();
-            }
-            private node@ primary(uint depth) {
-                whitespace();
-                uint position = offset + 1;
-                if (take("(")) {
-                    node@ grouped = expression(depth + 1);
-                    if (!take(")")) {
-                        fail("expected ')'");
-                    }
-                    return grouped;
-                }
-                if (take("$")) {
-                    node@ reference = make(reference_node, position);
-                    string first = reference_component();
-                    if (first.length() == 0) {
-                        fail("empty message reference component");
-                    }
-                    if (take("/")) {
-                        reference.catalog_name = first;
-                        reference.text = reference_component();
-                    }
-                    else {
-                        reference.text = first;
-                    }
-                    if (reference.text.length() == 0) {
-                        fail("empty message reference");
-                    }
-                    return reference;
-                }
-                node@ result = make(literal_node, position);
-                if (character() == "\"" || character() == "'") {
-                    @result.scalar = value(quoted());
-                    return result;
-                }
-                if (word("true")) {
-                    @result.scalar = value(true);
-                    return result;
-                }
-                if (word("false")) {
-                    @result.scalar = value(false);
-                    return result;
-                }
-                if (digit(character()) || character() == "-") {
-                    uint start = offset;
-                    if (character() == "-") {
-                        offset++;
-                    }
-                    uint digits_start = offset;
-                    while (digit(character())) {
-                        offset++;
-                    }
-                    if (offset == digits_start) {
-                        fail("expected numeric literal");
-                    }
-                    if (character() == ".") {
-                        offset++;
-                        uint fraction_start = offset;
-                        while (digit(character())) {
-                            offset++;
-                        }
-                        if (fraction_start == offset) {
-                            fail("expected fractional digits");
-                        }
-                    }
-                    if (character() == "e" || character() == "E") {
-                        offset++;
-                        if (character() == "+" || character() == "-") {
-                            offset++;
-                        }
-                        uint exponent_start = offset;
-                        while (digit(character())) {
-                            offset++;
-                        }
-                        if (exponent_start == offset) {
-                            fail("expected exponent digits");
-                        }
-                    }
-                    string numeric = source.substr(start, offset - start);
-                    if (numeric.find(".") < 0 && numeric.find("e") < 0 && numeric.find("E") < 0) {
-                        @result.scalar = integer_literal(numeric);
-                        if (result.scalar is null) {
-                            fail("integer literal out of range");
-                        }
-                        return result;
-                    }
-                    double number = parse_double(numeric);
-                    // NVGT reports overflowing input as zero, so also reject
-                    // any nonzero mantissa that unexpectedly converts to zero.
-                    bool nonzero = false;
-                    for (uint i = 0; i < numeric.length(); i++) {
-                        string part = numeric.substr(i, 1);
-                        if (part == "e" || part == "E") {
-                            break;
-                        }
-                        if ("123456789".find(part) >= 0) {
-                            nonzero = true;
-                        }
-                    }
-                    if (!is_finite(number) || (number == 0 && nonzero)) {
-                        fail("numeric literal out of range");
-                    }
-                    @result.scalar = value(number);
-                    return result;
-                }
-                result.kind = field_node;
-                result.text = identifier();
-                if (result.text == "join" && take("(")) {
-                    result.kind = join_node;
-                    // At least the separator is required. The final comma is
-                    // optional; this is one built-in, not arbitrary script calls.
-                    result.arguments.insert_last(expression(depth + 1));
-                    while (error.length() == 0 && !take(")")) {
-                        if (!take(",")) {
-                            fail("expected ',' or ')' in join");
-                            break;
-                        }
-                        if (take(")")) {
-                            break;
-                        }
-                        result.arguments.insert_last(expression(depth + 1));
-                    }
-                    return result;
-                }
-                if (result.text == "if" || result.text == "else" || result.text == "and"
-                    || result.text == "or" || result.text == "not") {
-                    fail("reserved word used as field");
-                }
-                return result;
-            }
-            private node@ comparison(uint depth) {
-                node@ left = primary(depth);
-                whitespace();
-                string operation;
-                string[] operators = {"==", "!=", "<=", ">=", "<", ">"};
-                for (uint i = 0; i < operators.length(); i++) {
-                    if (take(operators[i])) {
-                        operation = operators[i];
-                        break;
-                    }
-                }
-                if (operation.length() == 0) {
-                    return left;
-                }
-                node@ result = make(compare_node, left.position);
-                result.text = operation;
-                @result.left = left;
-                @result.right = primary(depth);
-                return result;
-            }
-            private node@ negation(uint depth) {
-                if (depth > max_depth) {
-                    fail("expression nesting limit exceeded");
-                    return make(literal_node, offset + 1);
-                }
-                whitespace();
-                uint position = offset + 1;
-                if (!word("not")) {
-                    return comparison(depth);
-                }
-                node@ result = make(not_node, position);
-                @result.left = negation(depth + 1);
-                return result;
-            }
-            private node@ conjunction(uint depth) {
-                node@ result = negation(depth);
-                while (error.length() == 0 && word("and")) {
-                    node@ combined = make(and_node, result.position);
-                    @combined.left = result;
-                    @combined.right = negation(depth);
-                    @result = combined;
-                }
-                return result;
-            }
-            private node@ disjunction(uint depth) {
-                node@ result = conjunction(depth);
-                while (error.length() == 0 && word("or")) {
-                    node@ combined = make(or_node, result.position);
-                    @combined.left = result;
-                    @combined.right = conjunction(depth);
-                    @result = combined;
-                }
-                return result;
-            }
-            private node@ expression(uint depth) {
-                if (depth > max_depth) {
-                    fail("expression nesting limit exceeded");
-                    return make(literal_node, offset + 1);
-                }
-                node@ result = disjunction(depth);
-                if (error.length() == 0 && word("if")) {
-                    node@ conditional = make(conditional_node, result.position);
-                    @conditional.left = disjunction(depth);
-                    @conditional.right = result;
-                    if (!word("else")) {
-                        fail("expected 'else'");
-                    }
-                    @conditional.alternative = expression(depth + 1);
-                    return conditional;
-                }
-                return result;
-            }
-            program@ compile() {
-                if (source.length() > max_source_bytes) {
-                    fail("template byte limit exceeded");
-                }
-                if (!utf8valid(source, false)) {
-                    fail("template is not valid UTF-8");
-                }
-                program@ result = program();
-                while (error.length() == 0 && offset < source.length()) {
-                    if (character() == "}") {
-                        fail("unexpected '}' outside expression");
-                    }
-                    else if (character() == "{") {
-                        offset++;
-                        result.parts.insert_last(expression(0));
-                        if (!take("}")) {
-                            fail("expected '}' after expression");
-                        }
-                    }
-                    else {
-                        uint start = offset;
-                        while (offset < source.length() && character() != "{" && character() != "}") {
-                            offset++;
-                        }
-                        node@ literal = make(literal_node, start + 1);
-                        @literal.scalar = value(source.substr(start, offset - start));
-                        result.parts.insert_last(literal);
-                    }
-                }
-                return error.length() == 0 ? result : null;
-            }
-        }
-    }
+			parser(const string&in source) {
+				this.source = source;
+			}
+			private void fail(const string&in reason) {
+				if (error.length() == 0) {
+					error = reason;
+					error_column = offset + 1;
+				}
+			}
+			private node@ make(node_kind kind, uint position) {
+				nodes++;
+				if (nodes > max_nodes) {
+					fail("template node limit exceeded");
+				}
+				return node(kind, position);
+			}
+			private string character() const {
+				return source.substr(offset, 1);
+			}
+			private void whitespace() {
+				while (offset < source.length()
+					&& " \t\r\n".find(character()) >= 0) {
+					offset++;
+				}
+			}
+			private bool take(const string&in token) {
+				whitespace();
+				if (source.substr(offset, token.length()) != token) {
+					return false;
+				}
+				offset += token.length();
+				return true;
+			}
+			private bool word(const string&in token) {
+				whitespace();
+				if (source.substr(offset, token.length()) != token) {
+					return false;
+				}
+				string next = source.substr(offset + token.length(), 1);
+				if (letter(next) || digit(next) || next == ".") {
+					return false;
+				}
+				offset += token.length();
+				return true;
+			}
+			private string identifier() {
+				whitespace();
+				uint start = offset;
+				if (!letter(character())) {
+					fail("expected identifier");
+					return "";
+				}
+				offset++;
+				while (offset < source.length()) {
+					string current = character();
+					if (letter(current) || digit(current)) {
+						offset++;
+					} else if (current == "." && letter(source.substr(offset + 1, 1))) {
+						offset += 2;
+					} else {
+						break;
+					}
+				}
+				return source.substr(start, offset - start);
+			}
+			private string quoted() {
+				whitespace();
+				string quote = character();
+				offset++;
+				string result;
+				while (offset < source.length()) {
+					string current = character();
+					offset++;
+					if (current == quote) {
+						return result;
+					}
+					if (current == "\\") {
+						if (offset >= source.length()) {
+							break;
+						}
+						current = character();
+						offset++;
+						if (current == "n") {
+							current = "\n";
+						} else if (current == "r") {
+							current = "\r";
+						} else if (current == "t") {
+							current = "\t";
+						} else if (current != "\\" && current != "\"" && current != "'") {
+							fail("unknown string escape");
+							return "";
+						}
+					}
+					result += current;
+				}
+				fail("unterminated string literal");
+				return "";
+			}
+			private string reference_component() {
+				whitespace();
+				if (character() == "\"" || character() == "'") {
+					return quoted();
+				}
+				return identifier();
+			}
+			private node@ primary(uint depth) {
+				whitespace();
+				uint position = offset + 1;
+				if (take("(")) {
+					node@ grouped = expression(depth + 1);
+					if (!take(")")) {
+						fail("expected ')'");
+					}
+					return grouped;
+				}
+				if (take("$")) {
+					node@ reference = make(reference_node, position);
+					string first = reference_component();
+					if (first.length() == 0) {
+						fail("empty message reference component");
+					}
+					if (take("/")) {
+						reference.catalog_name = first;
+						reference.text = reference_component();
+					} else {
+						reference.text = first;
+					}
+					if (reference.text.length() == 0) {
+						fail("empty message reference");
+					}
+					return reference;
+				}
+				node@ result = make(literal_node, position);
+				if (character() == "\"" || character() == "'") {
+					@result.scalar = value(quoted());
+					return result;
+				}
+				if (word("true")) {
+					@result.scalar = value(true);
+					return result;
+				}
+				if (word("false")) {
+					@result.scalar = value(false);
+					return result;
+				}
+				if (digit(character()) || character() == "-") {
+					uint start = offset;
+					if (character() == "-") {
+						offset++;
+					}
+					uint digits_start = offset;
+					while (digit(character())) {
+						offset++;
+					}
+					if (offset == digits_start) {
+						fail("expected numeric literal");
+					}
+					if (character() == ".") {
+						offset++;
+						uint fraction_start = offset;
+						while (digit(character())) {
+							offset++;
+						}
+						if (fraction_start == offset) {
+							fail("expected fractional digits");
+						}
+					}
+					if (character() == "e" || character() == "E") {
+						offset++;
+						if (character() == "+" || character() == "-") {
+							offset++;
+						}
+						uint exponent_start = offset;
+						while (digit(character())) {
+							offset++;
+						}
+						if (exponent_start == offset) {
+							fail("expected exponent digits");
+						}
+					}
+					string numeric = source.substr(start, offset - start);
+					if (numeric.find(".") < 0 && numeric.find("e") < 0 && numeric.find("E") < 0) {
+						@result.scalar = integer_literal(numeric);
+						if (result.scalar is null) {
+							fail("integer literal out of range");
+						}
+						return result;
+					}
+					double number = parse_double(numeric);
+					// NVGT reports overflowing input as zero, so also reject
+					// any nonzero mantissa that unexpectedly converts to zero.
+					bool nonzero = false;
+					for (uint i = 0; i < numeric.length(); i++) {
+						string part = numeric.substr(i, 1);
+						if (part == "e" || part == "E") {
+							break;
+						}
+						if ("123456789".find(part) >= 0) {
+							nonzero = true;
+						}
+					}
+					if (!is_finite(number) || (number == 0 && nonzero)) {
+						fail("numeric literal out of range");
+					}
+					@result.scalar = value(number);
+					return result;
+				}
+				result.kind = field_node;
+				result.text = identifier();
+				if (result.text == "join" && take("(")) {
+					result.kind = join_node;
+					// At least the separator is required. The final comma is
+					// optional; this is one built-in, not arbitrary script calls.
+					result.arguments.insert_last(expression(depth + 1));
+					while (error.length() == 0 && !take(")")) {
+						if (!take(",")) {
+							fail("expected ',' or ')' in join");
+							break;
+						}
+						if (take(")")) {
+							break;
+						}
+						result.arguments.insert_last(expression(depth + 1));
+					}
+					return result;
+				}
+				if (result.text == "if" || result.text == "else" || result.text == "and"
+					|| result.text == "or" || result.text == "not") {
+					fail("reserved word used as field");
+				}
+				return result;
+			}
+			private node@ comparison(uint depth) {
+				node@ left = primary(depth);
+				whitespace();
+				string operation;
+				string[] operators = {"==", "!=", "<=", ">=", "<", ">"};
+				for (uint i = 0; i < operators.length(); i++) {
+					if (take(operators[i])) {
+						operation = operators[i];
+						break;
+					}
+				}
+				if (operation.length() == 0) {
+					return left;
+				}
+				node@ result = make(compare_node, left.position);
+				result.text = operation;
+				@result.left = left;
+				@result.right = primary(depth);
+				return result;
+			}
+			private node@ negation(uint depth) {
+				if (depth > max_depth) {
+					fail("expression nesting limit exceeded");
+					return make(literal_node, offset + 1);
+				}
+				whitespace();
+				uint position = offset + 1;
+				if (!word("not")) {
+					return comparison(depth);
+				}
+				node@ result = make(not_node, position);
+				@result.left = negation(depth + 1);
+				return result;
+			}
+			private node@ conjunction(uint depth) {
+				node@ result = negation(depth);
+				while (error.length() == 0 && word("and")) {
+					node@ combined = make(and_node, result.position);
+					@combined.left = result;
+					@combined.right = negation(depth);
+					@result = combined;
+				}
+				return result;
+			}
+			private node@ disjunction(uint depth) {
+				node@ result = conjunction(depth);
+				while (error.length() == 0 && word("or")) {
+					node@ combined = make(or_node, result.position);
+					@combined.left = result;
+					@combined.right = conjunction(depth);
+					@result = combined;
+				}
+				return result;
+			}
+			private node@ expression(uint depth) {
+				if (depth > max_depth) {
+					fail("expression nesting limit exceeded");
+					return make(literal_node, offset + 1);
+				}
+				node@ result = disjunction(depth);
+				if (error.length() == 0 && word("if")) {
+					node@ conditional = make(conditional_node, result.position);
+					@conditional.left = disjunction(depth);
+					@conditional.right = result;
+					if (!word("else")) {
+						fail("expected 'else'");
+					}
+					@conditional.alternative = expression(depth + 1);
+					return conditional;
+				}
+				return result;
+			}
+			program@ compile() {
+				if (source.length() > max_source_bytes) {
+					fail("template byte limit exceeded");
+				}
+				if (!utf8valid(source, false)) {
+					fail("template is not valid UTF-8");
+				}
+				program@ result = program();
+				while (error.length() == 0 && offset < source.length()) {
+					if (character() == "}") {
+						fail("unexpected '}' outside expression");
+					} else if (character() == "{") {
+						offset++;
+						result.parts.insert_last(expression(0));
+						if (!take("}")) {
+							fail("expected '}' after expression");
+						}
+					} else {
+						uint start = offset;
+						while (offset < source.length() && character() != "{" && character() != "}") {
+							offset++;
+						}
+						node@ literal = make(literal_node, start + 1);
+						@literal.scalar = value(source.substr(start, offset - start));
+						result.parts.insert_last(literal);
+					}
+				}
+				return error.length() == 0 ? result : null;
+			}
+		}
+	}
 }

@@ -32,7 +32,7 @@ version, directive, syntax, limit or I/O error returns false, updates `error` an
 previous messages and their provenance. Successful loads clear the error.
 
 Version selection and preprocessing happen before message compilation; see
-[loading stages](../format.md#loading-stages). OpenSQCat supports SQCat 1, using
+[loading stages](../advanced/format.md#loading-stages). OpenSQCat supports SQCat 1, using
 that version when no declaration exists. Unsupported/malformed versions and
 required unknown directives fail loading. Unknown optional directives are skipped.
 Only `!sqcat_format_version` is recognized; no user directive registration or
@@ -40,7 +40,7 @@ dynamic directive mutation is provided. Declarations do not contribute to `size`
 `keys()` or lookups. Reload the whole catalog to change preprocessing decisions.
 
 An empty file is valid. Missing fields or references do not fail loading; only
-an evaluated use can require them. See the [format](../format.md).
+an evaluated use can require them. See the [format](../advanced/format.md).
 
 ## Reading
 
@@ -72,6 +72,7 @@ clears `loaded_path` and `error`.
 `loaded_path` only when a key was actually removed. `clear` removes all entries
 and clears provenance and errors.
 
-Catalog objects may be shared by translators. Changes apply to their next
-operation. Each formatting operation uses an independent map snapshot of the
-already parsed messages so callbacks cannot change its selected templates.
+Catalog objects may be shared by translators. Each rendering operation retains
+the templates selected at its start. Changes made during a provider callback
+apply to later operations, including calls through other translators that share
+the catalog.

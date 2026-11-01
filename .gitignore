@@ -1,1 +1,6 @@
-/build/
+/build/*
+!/build/.gitkeep
+/release/*
+!/release/.gitkeep
+/.agent-work/*
+!/.agent-work/.gitkeep

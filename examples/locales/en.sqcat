@@ -1,0 +1,10 @@
+!sqcat_format_version 1
+
+# Messages are independent from the program's structure.
+welcome = Hello, {playername}.
+balance = You have {money} coins.
+access = {"You can edit" if logged_in and (owner or admin) else "Read only"}
+hint = Use the arrow keys.
+help = {playername}: {$hint}
+brace = Write {"{playername}"} literally.
+summary = {join(", ", playername, "owner" if owner else "", "administrator" if admin else "")}

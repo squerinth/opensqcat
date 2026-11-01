@@ -18,8 +18,10 @@ Construction retains the supplied catalog; null creates a new empty catalog.
 `set_catalog(source)` replaces the current default; null installs a new empty
 one. If the default is named, the registration is replaced too.
 Neither operation changes general fields or the provider. A supplied constructor
-catalog counts as an installed anonymous default. Without one, the first
-successful load or named registration selects the default automatically.
+catalog counts as an installed anonymous default. Calling `set_catalog(source)`,
+including with null, also installs a default. A translator constructed without a
+catalog selects the first successful load or named registration automatically
+unless a default has already been installed explicitly.
 
 `set_provider` retains the supplied provider; null removes it. `set_resolver`
 installs a function or delegate through an internal provider, replacing any

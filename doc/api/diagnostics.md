@@ -31,7 +31,7 @@ An empty code means no error. Codes are:
 | `key` | Empty or invalid message key. |
 | `duplicate` | Repeated file key after trimming. |
 | `syntax` | Invalid template grammar/encoding or a compile-time template limit. |
-| `argument` | Unsupported or invalid field name/value. |
+| `argument` | Invalid catalog name, or unsupported or invalid field name/value. |
 | `catalog` | An explicitly selected or referenced catalog is absent. |
 | `message` | Root message or evaluated reference is absent. |
 | `field` | An absent field is required as output, a comparison operand or a join separator. |
@@ -51,7 +51,9 @@ is a one-based UTF-8 byte position, including the key/separator prefix for file
 syntax and evaluation errors. Zero means unavailable. A missing referenced
 message identifies the referring message; a missing root identifies the requested
 key without a column. Version/directive errors identify their physical line
-and the one-based byte column of the `!` marker; `key` is empty. Argument diagnostics identify the field name in `message`.
+and the one-based byte column of the `!` marker; `key` is empty. Field-argument
+diagnostics identify the field name in `message`; catalog-name argument errors
+describe the invalid name or the failed name inference.
 
 Diagnostics contain identifiers and reasons, not supplied field values or
 provider exception text. They are returned to the caller; the library does not
@@ -83,4 +85,4 @@ operations using it. Depth and active-reference limits remain per operation.
 
 These are implementation bounds for this version, not configurable options or
 limits on application/provider execution. Integers retain 64-bit precision; real numbers use double precision;
-see [numeric semantics](../format.md#numeric-values).
+see [numeric semantics](../advanced/format.md#numeric-values).

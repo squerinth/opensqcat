@@ -1,326 +1,336 @@
 namespace opensqcat {
-    class diagnostic {
-        string code;
-        string message;
-        string path;
-        string key;
-        string catalog;
-        uint line = 0;
-        uint column = 0;
+	class diagnostic {
+		string code;
+		string message;
+		string path;
+		string key;
+		string catalog;
+		uint line = 0;
+		uint column = 0;
 
-        diagnostic@ copy() const {
-            diagnostic@ result = diagnostic();
-            result.code = code;
-            result.message = message;
-            result.path = path;
-            result.key = key;
-            result.catalog = catalog;
-            result.line = line;
-            result.column = column;
-            return result;
-        }
-    }
+		diagnostic@ copy() const {
+			diagnostic@ result = diagnostic();
+			result.code = code;
+			result.message = message;
+			result.path = path;
+			result.key = key;
+			result.catalog = catalog;
+			result.line = line;
+			result.column = column;
+			return result;
+		}
+	}
 
-    namespace detail {
-        class message {
-            string source;
-            string path;
-            string key;
-            uint line = 0;
-            uint column = 1;
-            program@ compiled;
-        }
+	namespace detail {
+		class message {
+			string source;
+			string path;
+			string key;
+			uint line = 0;
+			uint column = 1;
+			program@ compiled;
+		}
 
-        uint leading_space(const string&in text) {
-            uint result = 0;
-            while (result < text.length() && " \t".find(text.substr(result, 1)) >= 0) {
-                result++;
-            }
-            return result;
-        }
-        string trim_space(const string&in text) {
-            uint start = leading_space(text);
-            uint end = text.length();
-            while (end > start && " \t".find(text.substr(end - 1, 1)) >= 0) {
-                end--;
-            }
-            return text.substr(start, end - start);
-        }
+		uint leading_space(const string&in text) {
+			uint result = 0;
+			while (result < text.length() && " \t".find(text.substr(result, 1)) >= 0) {
+				result++;
+			}
+			return result;
+		}
+		string trim_space(const string&in text) {
+			uint start = leading_space(text);
+			uint end = text.length();
+			while (end > start && " \t".find(text.substr(end - 1, 1)) >= 0) {
+				end--;
+			}
+			return text.substr(start, end - start);
+		}
 
-        // Sequential scans avoid allocating an array for every physical line.
-        class line_reader {
-            private string source;
-            private uint start = 0;
-            uint number = 0;
+		// Sequential scans avoid allocating an array for every physical line.
+		class line_reader {
+			private string source;
+			private uint start = 0;
+			uint number = 0;
 
-            line_reader(const string&in source) {
-                this.source = source;
-            }
-            bool next(string&out line) {
-                if (start > source.length()) {
-                    return false;
-                }
-                number++;
-                int ending = source.find("\n", start);
-                if (ending < 0) {
-                    line = source.substr(start);
-                    start = source.length() + 1;
-                }
-                else {
-                    line = source.substr(start, uint(ending) - start);
-                    start = uint(ending) + 1;
-                }
-                return true;
-            }
-        }
+			line_reader(const string&in source) {
+				this.source = source;
+			}
+			bool next(string&out line) {
+				if (start > source.length()) {
+					return false;
+				}
+				number++;
+				int ending = source.find("\n", start);
+				if (ending < 0) {
+					line = source.substr(start);
+					start = source.length() + 1;
+				} else {
+					line = source.substr(start, uint(ending) - start);
+					start = uint(ending) + 1;
+				}
+				return true;
+			}
+		}
 
-        class declaration {
-            bool optional = false;
-            string name;
-            string payload;
+		class declaration {
+			bool optional = false;
+			string name;
+			string payload;
 
-            declaration(const string&in trimmed) {
-                optional = trimmed.starts_with("!?");
-                uint start = optional ? 2 : 1;
-                uint end = start;
-                while (end < trimmed.length() && " \t".find(trimmed.substr(end, 1)) < 0) {
-                    end++;
-                }
-                name = trimmed.substr(start, end - start);
-                payload = trim_space(trimmed.substr(end));
-            }
-            bool valid_name() const {
-                bool initial = true;
-                for (uint i = 0; i < name.length(); i++) {
-                    string current = name.substr(i, 1);
-                    if (!initial && current == ".") {
-                        initial = true;
-                        continue;
-                    }
-                    string allowed = initial ? "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_"
-                        : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
-                    if (allowed.find(current) < 0) {
-                        return false;
-                    }
-                    initial = false;
-                }
-                return !initial;
-            }
-        }
-    }
+			declaration(const string&in trimmed) {
+				optional = trimmed.starts_with("!?");
+				uint start = optional ? 2 : 1;
+				uint end = start;
+				while (end < trimmed.length() && " \t".find(trimmed.substr(end, 1)) < 0) {
+					end++;
+				}
+				name = trimmed.substr(start, end - start);
+				payload = trim_space(trimmed.substr(end));
+			}
+			bool valid_name() const {
+				bool initial = true;
+				for (uint i = 0; i < name.length(); i++) {
+					string current = name.substr(i, 1);
+					if (!initial && current == ".") {
+						initial = true;
+						continue;
+					}
+					string allowed = initial ? "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_"
+						: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
+					if (allowed.find(current) < 0) {
+						return false;
+					}
+					initial = false;
+				}
+				return !initial;
+			}
+		}
+	}
 
-    class catalog {
-        private dictionary entries;
-        private diagnostic@ last_diagnostic = diagnostic();
-        private string path_value;
+	class catalog {
+		private dictionary entries;
+		private diagnostic@ last_diagnostic = diagnostic();
+		private string path_value;
 
-        diagnostic@ get_error() const property {
-            return last_diagnostic.copy();
-        }
-        string get_loaded_path() const property {
-            return path_value;
-        }
-        uint get_size() const property {
-            return entries.get_size();
-        }
-        private bool fail(const string&in code, const string&in reason,
-            const string&in path = "", uint line = 0,
-            const string&in key = "", uint column = 0) {
-            @last_diagnostic = diagnostic();
-            last_diagnostic.code = code;
-            last_diagnostic.message = reason;
-            last_diagnostic.path = path;
-            last_diagnostic.line = line;
-            last_diagnostic.key = key;
-            last_diagnostic.column = column;
-            return false;
-        }
-        private bool select_version(const string&in contents, const string&in origin) {
-            detail::line_reader lines(contents);
-            string line;
-            bool declared = false;
-            while (lines.next(line)) {
-                string trimmed = detail::trim_space(line);
-                if (!trimmed.starts_with("!")) {
-                    continue;
-                }
-                detail::declaration item(trimmed);
-                if (item.name != "sqcat_format_version") {
-                    continue;
-                }
-                uint column = detail::leading_space(line) + 1;
-                if (declared) {
-                    return fail("version", "duplicate SQCat version declaration", origin, lines.number, "", column);
-                }
-                declared = true;
-                if (item.optional || item.payload.length() == 0 || item.payload.starts_with("0")) {
-                    return fail("version", "expected required SQCat version as a positive decimal integer",
-                        origin, lines.number, "", column);
-                }
-                for (uint i = 0; i < item.payload.length(); i++) {
-                    if ("0123456789".find(item.payload.substr(i, 1)) < 0) {
-                        return fail("version", "invalid SQCat version declaration", origin, lines.number, "", column);
-                    }
-                }
-                // Compare the spelling rather than converting an unbounded integer.
-                if (item.payload != "1") {
-                    return fail("version", "unsupported SQCat version", origin, lines.number, "", column);
-                }
-            }
-            // No declaration means SQCat 1, never version inference from templates.
-            return true;
-        }
-        private bool preprocess(const string&in contents, const string&in origin) {
-            detail::line_reader lines(contents);
-            string line;
-            while (lines.next(line)) {
-                string trimmed = detail::trim_space(line);
-                if (!trimmed.starts_with("!")) {
-                    continue;
-                }
-                detail::declaration item(trimmed);
-                uint column = detail::leading_space(line) + 1;
-                if (!item.valid_name()) {
-                    return fail("directive", "invalid directive name", origin, lines.number, "", column);
-                }
-                if (item.name == "sqcat_format_version") {
-                    continue;
-                }
-                // No other directives are implemented yet. Optional unknown
-                // payloads are opaque, not expressions or message entries.
-                if (!item.optional) {
-                    return fail("directive", "unsupported required directive: " + item.name,
-                        origin, lines.number, "", column);
-                }
-            }
-            return true;
-        }
-        private detail::message@ compile(const string&in key, const string&in source,
-            const string&in path = "", uint line = 0, uint column = 1) {
-            detail::parser parser(source);
-            detail::program@ compiled = parser.compile();
-            if (compiled is null) {
-                fail("syntax", parser.error, path, line, key,
-                    column + parser.error_column - 1);
-                return null;
-            }
-            detail::message@ result = detail::message();
-            result.key = key;
-            result.source = source;
-            result.path = path;
-            result.line = line;
-            result.column = column;
-            @result.compiled = compiled;
-            return result;
-        }
-        bool contains(const string&in key) const {
-            return entries.exists(key);
-        }
-        bool lookup(const string&in key, string&out text) const {
-            text = "";
-            detail::message@ item;
-            if (!entries.get(key, @item)) {
-                return false;
-            }
-            text = item.source;
-            return true;
-        }
-        string[]@ keys() const {
-            return entries.get_keys();
-        }
-        bool set(const string&in key, const string&in text) {
-            if (key.length() == 0 || !utf8valid(key, false)) {
-                return fail("key", "message key must be nonempty valid UTF-8");
-            }
-            detail::message@ item = compile(key, text);
-            if (item is null) {
-                return false;
-            }
-            entries.set(key, @item);
-            path_value = "";
-            @last_diagnostic = diagnostic();
-            return true;
-        }
-        bool remove(const string&in key) {
-            bool removed = entries.delete(key);
-            if (removed) {
-                path_value = "";
-            }
-            @last_diagnostic = diagnostic();
-            return removed;
-        }
-        void clear() {
-            entries.delete_all();
-            path_value = "";
-            @last_diagnostic = diagnostic();
-        }
-        bool load(const string&in path) {
-            file input;
-            if (!input.open(path, "rb", "UTF-8")) {
-                return fail("io", "unable to open catalog", path);
-            }
-            if (input.available > detail::max_catalog_bytes) {
-                input.close();
-                return fail("limit", "catalog byte limit exceeded", path);
-            }
-            string source = input.read(detail::max_catalog_bytes + 1);
-            input.close();
-            return load_text(source, path);
-        }
-        bool load_text(const string&in source, const string&in origin = "") {
-            if (source.length() > detail::max_catalog_bytes) {
-                return fail("limit", "catalog byte limit exceeded", origin);
-            }
-            string contents = source;
-            contents.remove_UTF8_BOM();
-            if (!utf8valid(contents, false)) {
-                return fail("encoding", "catalog is not valid UTF-8", origin);
-            }
-            contents = contents.replace("\r\n", "\n");
-            if (contents.find("\r") >= 0) {
-                return fail("lines", "bare CR line endings are not supported", origin);
-            }
-            if (!select_version(contents, origin) || !preprocess(contents, origin)) {
-                return false;
-            }
-            dictionary staged;
-            detail::line_reader lines(contents);
-            string line;
-            while (lines.next(line)) {
-                string trimmed = detail::trim_space(line);
-                if (trimmed.length() == 0 || trimmed.starts_with("#") || trimmed.starts_with("!")) {
-                    continue;
-                }
-                int separator = line.find("=");
-                if (separator < 0) {
-                    return fail("entry", "catalog entry requires '='", origin, lines.number);
-                }
-                string key = detail::trim_space(line.substr(0, uint(separator)));
-                if (key.length() == 0) {
-                    return fail("key", "catalog key cannot be empty", origin, lines.number);
-                }
-                if (staged.exists(key)) {
-                    return fail("duplicate", "duplicate catalog key", origin, lines.number, key);
-                }
-                string rest = line.substr(uint(separator) + 1);
-                uint column = uint(separator) + 2 + detail::leading_space(rest);
-                detail::message@ item = compile(key, detail::trim_space(rest), origin, lines.number, column);
-                if (item is null) {
-                    return false;
-                }
-                staged.set(key, @item);
-            }
-            entries = staged;
-            path_value = origin;
-            @last_diagnostic = diagnostic();
-            return true;
-        }
+		diagnostic@ get_error() const property {
+			return last_diagnostic.copy();
+		}
+		string get_loaded_path() const property {
+			return path_value;
+		}
+		uint get_size() const property {
+			return entries.get_size();
+		}
+		private bool fail(const string&in code, const string&in reason,
+			const string&in path = "", uint line = 0,
+			const string&in key = "", uint column = 0) {
+			@last_diagnostic = diagnostic();
+			last_diagnostic.code = code;
+			last_diagnostic.message = reason;
+			last_diagnostic.path = path;
+			last_diagnostic.line = line;
+			last_diagnostic.key = key;
+			last_diagnostic.column = column;
+			return false;
+		}
+		private bool select_version(const string&in contents, const string&in origin) {
+			detail::line_reader lines(contents);
+			string line;
+			bool declared = false;
+			while (lines.next(line)) {
+				string trimmed = detail::trim_space(line);
+				if (!trimmed.starts_with("!")) {
+					continue;
+				}
+				detail::declaration item(trimmed);
+				if (item.name != "sqcat_format_version") {
+					continue;
+				}
+				uint column = detail::leading_space(line) + 1;
+				if (declared) {
+					return fail("version", "duplicate SQCat version declaration", origin, lines.number, "", column);
+				}
+				declared = true;
+				if (item.optional || item.payload.length() == 0 || item.payload.starts_with("0")) {
+					return fail("version", "expected required SQCat version as a positive decimal integer",
+						origin, lines.number, "", column);
+				}
+				for (uint i = 0; i < item.payload.length(); i++) {
+					if ("0123456789".find(item.payload.substr(i, 1)) < 0) {
+						return fail("version", "invalid SQCat version declaration", origin, lines.number, "", column);
+					}
+				}
+				// Compare the spelling rather than converting an unbounded integer.
+				if (item.payload != "1") {
+					return fail("version", "unsupported SQCat version", origin, lines.number, "", column);
+				}
+			}
+			// No declaration means SQCat 1, never version inference from templates.
+			return true;
+		}
+		private bool preprocess(const string&in contents, const string&in origin) {
+			detail::line_reader lines(contents);
+			string line;
+			while (lines.next(line)) {
+				string trimmed = detail::trim_space(line);
+				if (!trimmed.starts_with("!")) {
+					continue;
+				}
+				detail::declaration item(trimmed);
+				uint column = detail::leading_space(line) + 1;
+				if (!item.valid_name()) {
+					return fail("directive", "invalid directive name", origin, lines.number, "", column);
+				}
+				if (item.name == "sqcat_format_version") {
+					continue;
+				}
+				// No other directives are implemented yet. Optional unknown
+				// payloads are opaque, not expressions or message entries.
+				if (!item.optional) {
+					return fail("directive", "unsupported required directive: " + item.name,
+						origin, lines.number, "", column);
+				}
+			}
+			return true;
+		}
+		private detail::message@ compile(const string&in key, const string&in source,
+			const string&in path = "", uint line = 0, uint column = 1) {
+			detail::parser parser(source);
+			detail::program@ compiled = parser.compile();
+			if (compiled is null) {
+				fail("syntax", parser.error, path, line, key,
+					column + parser.error_column - 1);
+				return null;
+			}
+			detail::message@ result = detail::message();
+			result.key = key;
+			result.source = source;
+			result.path = path;
+			result.line = line;
+			result.column = column;
+			@result.compiled = compiled;
+			return result;
+		}
+		bool contains(const string&in key) const {
+			return entries.exists(key);
+		}
+		bool lookup(const string&in key, string&out text) const {
+			text = "";
+			detail::message@ item;
+			if (!entries.get(key, @item)) {
+				return false;
+			}
+			text = item.source;
+			return true;
+		}
+		string[]@ keys() const {
+			return entries.get_keys();
+		}
+		bool set(const string&in key, const string&in text) {
+			if (key.length() == 0 || !utf8valid(key, false)) {
+				return fail("key", "message key must be nonempty valid UTF-8");
+			}
+			detail::message@ item = compile(key, text);
+			if (item is null) {
+				return false;
+			}
+			entries.set(key, @item);
+			path_value = "";
+			@last_diagnostic = diagnostic();
+			return true;
+		}
+		bool remove(const string&in key) {
+			bool removed = entries.delete(key);
+			if (removed) {
+				path_value = "";
+			}
+			@last_diagnostic = diagnostic();
+			return removed;
+		}
+		void clear() {
+			entries.delete_all();
+			path_value = "";
+			@last_diagnostic = diagnostic();
+		}
+		bool load(const string&in path) {
+			file input;
+			if (!input.open(path, "rb", "UTF-8")) {
+				return fail("io", "unable to open catalog", path);
+			}
+			if (input.available > detail::max_catalog_bytes) {
+				input.close();
+				return fail("limit", "catalog byte limit exceeded", path);
+			}
+			string source = input.read(detail::max_catalog_bytes + 1);
+			input.close();
+			return load_text(source, path);
+		}
+		bool load_text(const string&in source, const string&in origin = "") {
+			if (source.length() > detail::max_catalog_bytes) {
+				return fail("limit", "catalog byte limit exceeded", origin);
+			}
+			string contents = source;
+			contents.remove_UTF8_BOM();
+			if (!utf8valid(contents, false)) {
+				return fail("encoding", "catalog is not valid UTF-8", origin);
+			}
+			contents = contents.replace("\r\n", "\n");
+			if (contents.find("\r") >= 0) {
+				return fail("lines", "bare CR line endings are not supported", origin);
+			}
+			if (!select_version(contents, origin) || !preprocess(contents, origin)) {
+				return false;
+			}
+			dictionary staged;
+			detail::line_reader lines(contents);
+			string line;
+			while (lines.next(line)) {
+				string trimmed = detail::trim_space(line);
+				if (trimmed.length() == 0 || trimmed.starts_with("#") || trimmed.starts_with("!")) {
+					continue;
+				}
+				int separator = line.find("=");
+				if (separator < 0) {
+					return fail("entry", "catalog entry requires '='", origin, lines.number);
+				}
+				string key = detail::trim_space(line.substr(0, uint(separator)));
+				if (key.length() == 0) {
+					return fail("key", "catalog key cannot be empty", origin, lines.number);
+				}
+				if (staged.exists(key)) {
+					return fail("duplicate", "duplicate catalog key", origin, lines.number, key);
+				}
+				string rest = line.substr(uint(separator) + 1);
+				uint column = uint(separator) + 2 + detail::leading_space(rest);
+				detail::message@ item = compile(key, detail::trim_space(rest), origin, lines.number, column);
+				if (item is null) {
+					return false;
+				}
+				staged.set(key, @item);
+			}
+			entries = staged;
+			path_value = origin;
+			@last_diagnostic = diagnostic();
+			return true;
+		}
 
-        // Internal operation snapshot; message records are immutable after creation.
-        dictionary@ snapshot() const {
-            dictionary@ result = dictionary();
-            result = entries;
-            return result;
-        }
-    }
+		// Internal operation snapshot. Keep shared parsed records encapsulated:
+		// public mutations replace entries, never modify an existing record.
+		catalog@ snapshot() const {
+			catalog@ result = catalog();
+			result.entries = entries;
+			result.path_value = path_value;
+			return result;
+		}
+		// Render without exposing a mutable message or its compiled nodes.
+		bool render(const string&in key, detail::evaluation@ state, string&out text) const {
+			detail::message@ item;
+			if (!entries.get(key, @item)) {
+				text = "";
+				return false;
+			}
+			return state.render_message(item, text);
+		}
+	}
 }
