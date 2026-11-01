@@ -1,0 +1,27 @@
+namespace opensqcat {
+    class evaluation_budget {
+        private uint steps_value = 0;
+        private uint bytes_value = 0;
+        private bool exhausted_value = false;
+
+        uint get_steps() const property {
+            return steps_value;
+        }
+        uint get_bytes() const property {
+            return bytes_value;
+        }
+        bool get_exhausted() const property {
+            return exhausted_value;
+        }
+        bool consume(uint steps = 0, uint bytes = 0) {
+            if (exhausted_value || steps > detail::max_steps - steps_value
+                || bytes > detail::max_output_bytes - bytes_value) {
+                exhausted_value = true;
+                return false;
+            }
+            steps_value += steps;
+            bytes_value += bytes;
+            return true;
+        }
+    }
+}

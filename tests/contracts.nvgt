@@ -1,0 +1,777 @@
+#pragma console
+#include "../src/opensqcat.nvgt"
+
+uint checks = 0;
+
+void check(bool condition, const string&in description) {
+    checks++;
+    if (!condition) {
+        println("FAIL: " + description);
+        exit(1);
+    }
+}
+
+void expect(opensqcat::translator@ messages, const string&in source,
+    const string&in wanted, dictionary@ fields = null) {
+    string actual;
+    bool valid = messages.try_format(source, actual, fields);
+    check(valid && actual == wanted,
+        source + " expected [" + wanted + "] got [" + actual + "] error=" + messages.error.message);
+}
+
+class counting_provider : opensqcat::field_provider {
+    uint calls = 0;
+    string player = "Ana";
+    bool throws = false;
+    bool invalid = false;
+    bool missing = false;
+
+    bool resolve(const string&in name, var@&out result) override {
+        calls++;
+        if (throws) {
+            throw("secret data must not enter a diagnostic");
+        }
+        if (missing || name != "player") {
+            return false;
+        }
+        if (invalid) {
+            @result = null;
+            return true;
+        }
+        @result = var(player);
+        return true;
+    }
+}
+
+bool fixed_resolver(const string&in name, var@&out result) {
+    if (name != "player") {
+        return false;
+    }
+    @result = var("callback");
+    return true;
+}
+
+class mutating_provider : opensqcat::field_provider {
+    opensqcat::translator@ target;
+    uint calls = 0;
+
+    mutating_provider(opensqcat::translator@ target) {
+        @this.target = target;
+    }
+    bool resolve(const string&in name, var@&out result) override {
+        calls++;
+        if (name != "trigger") {
+            return false;
+        }
+        target.load_text("root=next\nhint=new");
+        target.set_variables({{"stable", "new general"}});
+        target.set_provider(null);
+        @result = var("changed");
+        return true;
+    }
+}
+
+class native_provider : opensqcat::field_provider {
+    var current = var(int64(9007199254740993));
+
+    bool resolve(const string&in name, var@&out result) override {
+        if (name == "change") {
+            current = false;
+        }
+        else if (name != "first") {
+            return false;
+        }
+        @result = current;
+        return true;
+    }
+}
+
+class catalog_mutator : opensqcat::field_provider {
+    opensqcat::translator@ target;
+    opensqcat::catalog@ shared;
+    uint calls = 0;
+
+    catalog_mutator(opensqcat::translator@ target, opensqcat::catalog@ shared) {
+        @this.target = target;
+        @this.shared = shared;
+    }
+    bool resolve(const string&in name, var@&out result) override {
+        calls++;
+        if (name != "trigger") {
+            return false;
+        }
+        shared.load_text("hint=mutated original");
+        target.remove_catalog("common");
+        target.load_text("root=next");
+        target.load_text("hint=replacement", "replacement", "common");
+        @result = var("changed");
+        return true;
+    }
+}
+
+class default_switcher : opensqcat::field_provider {
+    opensqcat::translator@ target;
+
+    default_switcher(opensqcat::translator@ target) {
+        @this.target = target;
+    }
+    bool resolve(const string&in name, var@&out result) override {
+        if (name != "change") {
+            return false;
+        }
+        target.set_default_catalog("second");
+        @result = var("changed");
+        return true;
+    }
+}
+
+void test_catalog() {
+    opensqcat::catalog catalog;
+    check(catalog.load_text("\xEF\xBB\xBF# UTF-8\r\n Name = Uno \r\nname = Dos\r\nempty=\r\nformula=a=b # literal\r\n", "sample"),
+        "BOM, CRLF, case-sensitive keys and empty values");
+    string text;
+    check(catalog.size == 4 && catalog.loaded_path == "sample", "catalog metadata");
+    check(catalog.lookup("Name", text) && text == "Uno", "uppercase key");
+    check(catalog.lookup("name", text) && text == "Dos", "lowercase key");
+    check(catalog.lookup("empty", text) && text == "", "empty is present");
+    check(catalog.lookup("formula", text) && text == "a=b # literal", "first equals and no inline comments");
+    check(!catalog.lookup("absent", text) && text == "", "missing lookup clears output");
+    check(catalog.keys().length() == 4, "key enumeration");
+    check(!catalog.load_text("x=one\nx=two", "duplicate")
+        && catalog.error.code == "duplicate" && catalog.error.line == 2, "duplicate diagnostic");
+    check(catalog.loaded_path == "sample" && catalog.contains("Name"), "failed load retains entries and origin");
+    check(!catalog.load_text(" =text") && catalog.error.code == "key", "empty key rejected");
+    check(!catalog.load_text("missing separator") && catalog.error.code == "entry", "separator required");
+    check(!catalog.load_text("x=a\rx=b") && catalog.error.code == "lines", "bare CR rejected");
+    check(!catalog.load("fixtures/invalid_utf8.sqcat") && catalog.error.code == "encoding", "invalid UTF-8 rejected");
+    check(!catalog.load("fixtures/nonexistent.sqcat") && catalog.error.code == "io", "missing file retains state");
+    check(catalog.contains("Name"), "I/O failure retained catalog");
+    check(!catalog.load_text("ok=good\nbad= {\"unterminated}", "broken")
+        && catalog.error.code == "syntax" && catalog.error.line == 2
+        && catalog.error.key == "bad" && catalog.error.column > 0, "syntax diagnostic retains origin");
+    check(!catalog.contains("ok") && catalog.contains("Name"), "syntax failure is transactional");
+    check(catalog.set("natural key = #", "valid"), "memory keys need not fit file syntax");
+    check(!catalog.set("natural key = #", "{") && catalog.lookup("natural key = #", text)
+        && text == "valid", "failed set retains old message");
+    check(catalog.remove("natural key = #") && !catalog.remove("missing"), "remove reports presence");
+    check(catalog.set("fresh", "new") && catalog.error.code == "" && catalog.loaded_path == "", "successful mutation clears diagnostic and file provenance");
+    catalog.clear();
+    check(catalog.size == 0, "clear removes messages");
+    check(catalog.load_text(""), "empty catalogs are valid");
+    check(catalog.load("../examples/locales/es.sqcat") && catalog.contains("welcome")
+        && catalog.loaded_path == "../examples/locales/es.sqcat", "real UTF-8 file loads");
+    check(!catalog.load_text("bad=\xff") && catalog.error.code == "encoding", "invalid in-memory UTF-8 rejected");
+    check(!catalog.set("\xff", "bad") && catalog.error.code == "key", "invalid UTF-8 key rejected");
+    check(!catalog.set("invalid", "\xff") && catalog.error.code == "syntax", "invalid UTF-8 template rejected");
+    opensqcat::diagnostic@ detached = catalog.error;
+    detached.code = "modified outside";
+    check(catalog.error.code == "syntax", "diagnostics are detached copies");
+}
+
+void test_declarations() {
+    opensqcat::catalog catalog;
+    check(catalog.load_text("!sqcat_format_version 1\nhello=Hola", "versioned"), "explicit SQCat 1 declaration");
+    check(catalog.size == 1 && !catalog.contains("!sqcat_format_version"), "version declaration is not an entry");
+    check(catalog.load_text("first=One\n!?future.option x={unparsed\n!sqcat_format_version 1\nsecond=Two", "staged"),
+        "version found anywhere and unknown optional payload ignored");
+    check(catalog.size == 2 && catalog.loaded_path == "staged", "only message pairs installed");
+    check(!catalog.load_text("first={\n!sqcat_format_version 2", "future") && catalog.error.code == "version"
+        && catalog.error.line == 2 && catalog.error.column == 1, "version selection precedes message compilation");
+    check(catalog.size == 2 && catalog.loaded_path == "staged", "version failure retains prior catalog");
+    check(!catalog.load_text("first={\n  !future.option value", "required")
+        && catalog.error.code == "directive" && catalog.error.line == 2 && catalog.error.column == 3,
+        "required directive failure precedes message compilation");
+    check(catalog.loaded_path == "staged", "directive failure preserves provenance");
+    check(!catalog.load_text("!sqcat_format_version 1\n!sqcat_format_version 1") && catalog.error.code == "version"
+        && catalog.error.line == 2, "duplicate version declarations rejected even when identical");
+    string[] invalid_versions = {"", "0", "01", "-1", "+1", "1.0", "one", "1 # comment", "1 2"};
+    for (uint i = 0; i < invalid_versions.length(); i++) {
+        check(!catalog.load_text("!sqcat_format_version " + invalid_versions[i]) && catalog.error.code == "version",
+            "malformed version does not fall back: " + invalid_versions[i]);
+    }
+    check(!catalog.load_text("!?sqcat_format_version 1") && catalog.error.code == "version", "version cannot be optional");
+    check(!catalog.load_text("!sqcat 1") && catalog.error.code == "directive", "old experimental version spelling is not an alias");
+    check(!catalog.load_text("!sqcat_format_version_extra 1") && catalog.error.code == "directive",
+        "version name matches a whole token");
+    check(!catalog.load_text("!?future \xff") && catalog.error.code == "encoding",
+        "ignored optional payload still requires valid file encoding");
+    check(!catalog.load_text("!?future x\r!sqcat_format_version 1") && catalog.error.code == "lines",
+        "ignored optional payload still requires valid line endings");
+    check(!catalog.load_text("!sqcat_format_version 2\n!?bad..name value") && catalog.error.code == "version",
+        "unsupported version rejected before version-specific directive validation");
+    check(!catalog.load_text("!future first\n!?future second") && catalog.error.code == "directive"
+        && catalog.error.line == 1, "later optional declarations cannot hide unsupported required declarations");
+    check(!catalog.load_text("!sqcat_format_version 999999999999999999999999999999999")
+        && catalog.error.code == "version", "huge unsupported version rejected without integer overflow");
+    string[] invalid_directives = {"!", "!?", "! name", "!? name", "!?9name value", "!?a..b value",
+        "!?a. value", "!?.a value", "!?a-b value", "!?name=value"};
+    for (uint i = 0; i < invalid_directives.length(); i++) {
+        check(!catalog.load_text(invalid_directives[i]) && catalog.error.code == "directive",
+            "optional and required declarations need valid names: " + invalid_directives[i]);
+    }
+    check(catalog.load_text("\xEF\xBB\xBF \t!sqcat_format_version\t1 \t\r\n\t!?future.option\tanything = {\r\nkey=value"),
+        "declarations accept BOM CRLF spaces and tabs");
+    check(catalog.load_text("# !sqcat_format_version 2\nkey=literal !sqcat_format_version 2\nother=!?future x"),
+        "comments and entry text never select a version or directive");
+    string text;
+    check(catalog.lookup("key", text) && text == "literal !sqcat_format_version 2", "declaration-like text preserved");
+    check(catalog.load_text("!?future\n!?future other\n# comment\n" ) && catalog.size == 0,
+        "optional unknown declarations without messages form an empty catalog");
+    check(catalog.load_text("plain=implicit version one") && catalog.size == 1, "missing version falls back to SQCat 1");
+    check(catalog.set("!memory-only", "allowed"), "memory keys do not use file declaration rules");
+    check(catalog.load_text("!sqcat_format_version 1\n  item = {missing}", "lines"), "versioned template retains source coordinates");
+    opensqcat::translator messages(catalog);
+    bool valid = messages.try_get("item", text);
+    check(!valid && messages.error.line == 2 && messages.error.column == 11,
+        "evaluation coordinates include declarations and entry prefixes: line=" + messages.error.line
+        + " column=" + messages.error.column);
+    expect(messages, "literal !sqcat_format_version 2", "literal !sqcat_format_version 2");
+    expect(messages, "!sqcat_format_version 2", "!sqcat_format_version 2");
+    check(catalog.load_text("# comments\n\n!?future payload\n!sqcat_format_version 1\nentry= {" ) == false
+        && catalog.error.code == "syntax" && catalog.error.line == 5, "compile diagnostics preserve skipped physical lines");
+}
+
+void test_expressions() {
+    opensqcat::translator messages;
+    dictionary fields = {{"player", "Ana"}, {"money", 25}, {"zero", 0},
+        {"empty", ""}, {"yes", var(true)}, {"no", var(false)}};
+    expect(messages, "Hola, {player}. Tienes {money}.", "Hola, Ana. Tienes 25.", fields);
+    expect(messages, "{money}{money}", "2525", fields);
+    expect(messages, "{yes} {no}", "true false", fields);
+    expect(messages, "{\"{\"}player{\"}\"}", "{player}");
+    expect(messages, "{\"{player}\"}", "{player}");
+    expect(messages, "\"outside\" + # $", "\"outside\" + # $");
+    expect(messages, "Price: ${money}", "Price: $25", fields);
+    expect(messages, "{'single'} {\"double\"}", "single double");
+    expect(messages, "{\"line\\nnext\\t\\\"quote\\\"\\\\\"}", "line\nnext\t\"quote\"\\");
+    expect(messages, "{true} {false} {-1.25} {1e2}", "true false -1.25 100");
+    expect(messages, "{\"edit\" if yes and (no or money > 0) else \"read\"}", "edit", fields);
+    expect(messages, "{\"A\" if false else \"B\" if true else \"C\"}", "B");
+    expect(messages, "{\"present\" if player else \"absent\"}", "present", fields);
+    expect(messages, "{player if player else \"guest\"}", "Ana", fields);
+    expect(messages, "{missing if missing else \"guest\"}", "guest");
+    expect(messages, "{not missing} {not empty} {not zero} {not no}", "true true true true", fields);
+    expect(messages, "{false and missing} {true or missing}", "false true");
+    expect(messages, "{true or false and false} {(true or false) and false}", "true false");
+    expect(messages, "{not 1 == 2} {not (1 < 2)}", "true false");
+    expect(messages, "{1 == 1} {1 != 2} {1 < 2} {1 <= 1} {2 > 1} {2 >= 2}", "true true true true true true");
+    expect(messages, "{'a' < 'b'} {'a' == 'a'} {1 == '1'} {true != 1}", "true true false true");
+    expect(messages, "{\"nonempty\" if 'false' else \"empty\"}", "nonempty");
+    expect(messages, "{\"yes\" if -1 else \"no\"}", "yes");
+    expect(messages, "{\"yes\" if 0 else \"no\"}", "no");
+    expect(messages, "{player.name}", "Ana", {{"player.name", "Ana"}});
+    expect(messages, "{'sí' if 'á' != 'a' else 'no'}", "sí");
+    expect(messages, "{0e9999}", "0");
+    expect(messages, "{\"yes\" if false and $missing else \"no\"}", "no");
+    expect(messages, "", "");
+    expect(messages, "{\"\"}", "");
+    expect(messages, "{player}", "{money}", {{"player", "{money}"}});
+
+    string output = "sentinel";
+    check(!messages.try_format("prefix {unknown}", output) && output == ""
+        && messages.error.code == "field", "unknown field fails without partial output");
+    check(!messages.try_format("{missing == 1}", output) && messages.error.code == "field", "missing comparison is an error");
+    check(!messages.try_format("{1 < '2'}", output) && messages.error.code == "type", "no implicit text-number ordering");
+    check(!messages.try_format("{true < false}", output) && messages.error.code == "type", "no boolean ordering");
+    string[] invalid = {"{", "}", "{}", "{{", "}}", "{#old}", "{player| }", "{player + money}",
+        "{call()}", "{x = 1}", "{1 < 2 < 3}", "{\"yes\" if true}", "{true else false}",
+        "{(true}", "{\"bad\\q\"}", "{'unterminated}", "{1.}", "{-}", "{1e}", "{1e9999}",
+        "{1e-9999}", "{$}", "{$''}", "{and}", "{x..y}"};
+    for (uint i = 0; i < invalid.length(); i++) {
+        check(!messages.try_format(invalid[i], output) && output == ""
+            && messages.error.code == "syntax" && messages.error.column > 0, "reject invalid syntax " + invalid[i]);
+    }
+    expect(messages, "recovered", "recovered");
+    check(messages.error.code == "", "success clears prior diagnostics");
+}
+
+void test_join() {
+    opensqcat::translator messages;
+    expect(messages, "{join(' ', 'Guardar', 'botón')}", "Guardar botón");
+    expect(messages, "{join(', ', 'A', '', missing, 'B')}", "A, B");
+    expect(messages, "{join(' ', '', missing, '')}", "");
+    expect(messages, "{join(' ')}", "");
+    expect(messages, "{join(' ',)}", "");
+    expect(messages, "{join('', 'A', 'B',)}", "AB");
+    expect(messages, "{join(' ', 0, false, true, -2.5)}", "0 false true -2.5");
+    expect(messages, "{join('|', ' ', '  ')}", " |  ");
+    expect(messages, "{join(', ', join(' ', name, role), value, state)}", "Guardar botón, seleccionado",
+        {{"name", "Guardar"}, {"role", "botón"}, {"value", ""}, {"state", "seleccionado"}});
+    expect(messages, "{join(separator, first, second)}", "A / B",
+        {{"separator", " / "}, {"first", "A"}, {"second", "B"}});
+    expect(messages, "{join(' ', 'yes' if true else missing, 'end')}", "yes end");
+    expect(messages, "{join(' ', 'x', missing) if false else 'safe'}", "safe");
+    expect(messages, "{join(' ', 'a', 'b') == 'a b'}", "true");
+    expect(messages, "{join}", "field called join", {{"join", "field called join"}});
+    expect(messages, "{join.name}", "dotted field", {{"join.name", "dotted field"}});
+    expect(messages, "{join(' ', '{player}', '$hint')}", "{player} $hint");
+    check(messages.load_text("part={player}\nempty=\ncombined={join(', ', $part, $empty, 'End')}"), "join templates compile in catalogs");
+    check(messages.get("combined", {{"player", "Ana"}}) == "Ana, End", "join accepts references and skips empty referenced text");
+    counting_provider provider;
+    messages.set_provider(provider);
+    expect(messages, "{join(' ', player, player)}", "Ana Ana");
+    check(provider.calls == 1, "join uses operation-wide field memoization");
+    uint before = provider.calls;
+    expect(messages, "{'safe' if true else join(' ', player, missing)}", "safe");
+    check(provider.calls == before, "unselected joins do not call providers");
+    messages.set_provider(null);
+    string output;
+    check(!messages.try_format("{join(0, 'x')}", output)
+        && output == "" && messages.error.code == "type", "join separator must be text");
+    check(!messages.try_format("{join(missing, 'x')}", output)
+        && output == "" && messages.error.code == "field", "missing separator is not silently skipped");
+    check(!messages.try_format("{join(' ', $missing)}", output)
+        && output == "" && messages.error.code == "message", "join does not hide missing message references");
+    string[] invalid = {"{join()}", "{join(,)}", "{join(' ',, 'x')}", "{join(' ' 'x')}",
+        "{join(' ', 'x'}", "{join(' ', x=1)}", "{join(' ', [a,b])}", "{join.custom(' ', 'x')}"};
+    for (uint i = 0; i < invalid.length(); i++) {
+        check(!messages.try_format(invalid[i], output) && output == ""
+            && messages.error.code == "syntax", "reject malformed or unsupported call " + invalid[i]);
+    }
+    string nested = "'x'";
+    for (uint i = 0; i < 100; i++) {
+        nested = "join(' ', " + nested + ")";
+    }
+    check(!messages.try_format("{" + nested + "}", output)
+        && messages.error.code == "syntax", "nested joins respect parse depth limit");
+    string big;
+    for (uint i = 0; i < 600000; i++) {
+        big += "x";
+    }
+    check(!messages.try_format("prefix {join(' ', x, x)}", output, {{"x", big}})
+        && output == "" && messages.error.code == "limit", "join respects shared output budget without partial output");
+    expect(messages, "{join(' ', 'after', 'failure')}", "after failure");
+}
+
+void test_references() {
+    opensqcat::translator messages;
+    check(messages.load_text("hint=Use arrows\nmessage={player}: {$hint}\nempty=\n"
+        + "space key=space value\nquoted={$\"space key\"}\nself={$self}\na={$b}\nb={$a}\n"
+        + "broken={$absent}\nguarded={\"safe\" if true else $self}\nplayer=catalog text\n"), "reference fixtures compile without eager resolution");
+    check(messages.get("message", {{"player", "Ana"}}) == "Ana: Use arrows", "references inherit fields");
+    check(messages.get("quoted") == "space value", "quoted reference keys");
+    check(messages.get("guarded") == "safe", "unselected cyclic reference is not evaluated");
+    string raw;
+    check(messages.lookup("message", raw) && raw == "{player}: {$hint}", "literal lookup does not format");
+    string output;
+    check(messages.lookup("empty", output) && output == "" && messages.has("empty"), "empty literal lookup");
+    check(messages.try_get("empty", output) && output == "", "empty message formats successfully");
+    check(!messages.try_get("self", output) && messages.error.code == "cycle", "self-cycle detected");
+    check(!messages.try_get("a", output) && messages.error.code == "cycle", "indirect cycle detected");
+    check(!messages.try_get("broken", output) && output == "" && messages.error.code == "message"
+        && messages.error.key == "broken", "missing reference fails in referring message");
+    check(messages.get("does not exist") == "does not exist" && messages.error.code == "message", "missing root format returns key");
+    check(messages.get("missing") == "missing" && messages.error.code == "message", "missing literal get returns key");
+    check(!messages.try_get("missing", output) && output == "", "strict format distinguishes missing root");
+    check(!messages.try_format("{player}", output) && messages.error.code == "field", "fields never fall through to catalog keys");
+    check(messages.format("{$player}") == "catalog text", "references explicitly select catalog keys");
+    check(!messages.load_text("bad={") && messages.get("player") == "catalog text", "translator reload retains prior catalog on syntax failure");
+    check(messages.format("{$'space key'}") == "space value", "single-quoted references");
+    opensqcat::catalog odd_keys;
+    check(odd_keys.set("# key = {x}", "arbitrary"), "prepare arbitrary key");
+    messages.set_catalog(odd_keys);
+    check(messages.format("{$\"# key = {x}\"}") == "arbitrary", "quoted keys contain punctuation and braces");
+}
+
+void test_catalog_reference_syntax() {
+    opensqcat::translator messages;
+    expect(messages, "{'safe' if true else $common/hint}", "safe");
+    expect(messages, "{'safe' if true else $common/\"hint/with/slash\"}", "safe");
+    expect(messages, "{'safe' if true else $\"common messages\"/hint}", "safe");
+    expect(messages, "{'safe' if true else $\"common/messages\"/\"hint/with/slash\"}", "safe");
+    expect(messages, "{false and $common/hint}", "false");
+    expect(messages, "{'safe' if true else $ common / hint}", "safe");
+    string[] invalid = {"{$common/}", "{$/hint}", "{$common/hint/extra}", "{$''/hint}",
+        "{$common/''}", "{$common/\"unterminated}", "{$common/9hint}"};
+    string text;
+    for (uint i = 0; i < invalid.length(); i++) {
+        check(!messages.try_format(invalid[i], text) && messages.error.code == "syntax",
+            "malformed qualified reference: " + invalid[i]);
+    }
+    check(messages.load_text("common/hint=literal slash key"), "prepare local slash key");
+    expect(messages, "{$\"common/hint\"}", "literal slash key");
+    check(!messages.try_format("{$common/hint}", text) && text == "" && messages.error.code == "catalog",
+        "qualified references never fall back to a local slash key");
+}
+
+void test_multiple_catalogs() {
+    opensqcat::translator messages;
+    check(messages.load_text("hint=default\nroot={$common/root}\necho={player} {$common/echo}"), "prepare default catalog");
+    check(messages.load_text("hint=common\nroot={$hint}\necho={player} {player}\nquoted/key=literal", "common origin", "common"),
+        "load named catalog from text");
+    check(messages.get("root") == "common", "same key in distinct catalogs is not a cycle");
+    check(messages.get("hint") == "default" && messages.get_from("common", "hint") == "common", "catalog keys do not collide");
+    check(messages.get_from("common", "quoted/key") == "literal", "get_from keys remain literal");
+    expect(messages, "{$common/\"quoted/key\"}", "literal");
+    check(messages.format_from("common", "{$hint}") == "common", "inline local references use selected catalog");
+    string output;
+    check(messages.try_format_from("common", "{$hint}", output) && output == "common", "strict inline named scope");
+    check(messages.try_get_from("common", "root", output) && output == "common", "strict named root lookup");
+    check(messages.has_from("common", "root") && !messages.has_from("missing", "root"), "named presence query");
+    check(messages.lookup_from("common", "root", output) && output == "{$hint}", "named raw lookup");
+    check(!messages.lookup_from("missing", "root", output) && output == "", "missing named lookup clears output");
+    check(messages.has_catalog("") && messages.has_catalog("common") && !messages.has_catalog("missing"), "catalog presence query includes default");
+    check(messages.get_from("missing", "hint") == "hint" && messages.error.code == "catalog"
+        && messages.error.catalog == "missing" && messages.error.key == "hint", "missing root catalog diagnostic");
+    check(!messages.try_format_from("missing", "plain", output) && messages.error.code == "catalog" && output == "",
+        "inline named scope requires registered catalog even without references");
+    check(messages.get_from("common", "absent") == "absent" && messages.error.code == "message"
+        && messages.error.catalog == "common", "missing root key identifies named catalog");
+    check(messages.load_text("bad={$missing/hint}", "default origin"), "prepare missing reference");
+    check(!messages.try_get("bad", output) && messages.error.code == "catalog" && messages.error.path == "default origin"
+        && messages.error.key == "bad" && messages.error.catalog == "", "missing named reference identifies referring message");
+    check(messages.load_text("bad={missing}", "broken named", "common"), "prepare error inside named message");
+    check(!messages.try_get_from("common", "bad", output) && messages.error.catalog == "common"
+        && messages.error.path == "broken named" && messages.error.key == "bad", "field error inside named catalog");
+    check(messages.set_catalog("common", null) && !messages.has_from("common", "bad"), "null installs an empty named catalog");
+    check(!messages.set_catalog("", null) && messages.error.code == "argument", "named registration rejects empty name");
+    check(!messages.set_catalog("\xff", null) && messages.error.code == "argument", "registration validates catalog name UTF-8");
+    check(!messages.load_text("x=bad", "", "\xff") && messages.error.code == "argument", "named loading validates name");
+    check(!messages.load_text("bad={", "failed", "never-installed") && !messages.has_catalog("never-installed"),
+        "failed new named catalog is not registered");
+    check(messages.load_text("stable=old", "stable origin", "common"), "prepare named reload");
+    check(!messages.load_text("bad={", "failed reload", "common") && messages.error.catalog == "common", "named reload fails transactionally");
+    check(messages.get_from("common", "stable") == "old", "failed reload preserves previous named messages");
+    check(messages.load("../examples/locales/es.sqcat", "file") && messages.has_from("file", "welcome"), "named file load");
+    check(!messages.load("fixtures/nonexistent.sqcat", "not-installed") && !messages.has_catalog("not-installed"), "failed named file load does not install");
+    check(messages.remove_catalog("file") && !messages.remove_catalog("file") && !messages.remove_catalog(""), "named removal leaves default catalog installed");
+    opensqcat::catalog punctuation;
+    check(punctuation.set("key/with/slashes", "quoted catalog and key"), "prepare arbitrary named key");
+    check(messages.set_catalog("catalog/with spaces", punctuation), "register arbitrary UTF-8 catalog name");
+    expect(messages, "{$\"catalog/with spaces\"/\"key/with/slashes\"}", "quoted catalog and key");
+    check(messages.load_text("root={$b/root}", "a origin", "a")
+        && messages.load_text("root={$a/root}", "b origin", "b"), "prepare cross-catalog cycle");
+    check(!messages.try_get_from("a", "root", output) && messages.error.code == "cycle"
+        && messages.error.catalog == "b" && messages.error.key == "root", "cycle identity includes catalog and key");
+    check(messages.load_text("root={$common/root}\necho={player} {$common/echo}"), "prepare shared field cache");
+    check(messages.load_text("root={$hint}\nhint=common\necho={player} {player}", "", "common"), "prepare common field cache");
+    counting_provider provider;
+    messages.set_provider(provider);
+    check(messages.get("echo") == "Ana Ana Ana" && provider.calls == 1, "provider cache shared across catalogs");
+    check(messages.get("echo", {{"player", "temporary"}}) == "temporary temporary temporary" && provider.calls == 1,
+        "temporary arguments shared across catalogs");
+    opensqcat::catalog shared;
+    check(shared.load_text("hint=old"), "prepare shared named object");
+    check(messages.set_catalog("common", shared) && messages.load_text("root={trigger} {$common/hint} {$common/hint}"), "prepare registry mutation");
+    catalog_mutator mutator(messages, shared);
+    messages.set_provider(mutator);
+    check(messages.get("root") == "changed old old" && mutator.calls == 1,
+        "snapshots retain named mappings and content across provider mutations");
+    check(messages.get("root") == "next" && messages.get_from("common", "hint") == "replacement", "next operation observes named registry changes");
+    check(messages.load_text("root={$other/repeat}") && messages.load_text("repeat={$piece}{$piece}\npiece={x}", "", "other"), "prepare shared cross-catalog output limit");
+    string big;
+    for (uint i = 0; i < 300000; i++) {
+        big += "x";
+    }
+    check(!messages.try_get("root", output, {{"x", big}}) && output == "" && messages.error.code == "limit",
+        "cross-catalog references share cumulative output budget");
+}
+
+void test_catalog_default_selection() {
+    opensqcat::translator messages;
+    check(messages.load("../examples/locales/es.sqcat"), "first file loads without explicit name");
+    check(messages.has_catalog("es") && messages.has_from("es", "welcome"), "file basename determines catalog name");
+    check(messages.default_catalog == "es", "default property reports inferred name");
+    check(messages.get("welcome", {{"playername", "Ana"}}) == "Hola, Ana.", "first file is default catalog");
+    check(messages.load("../examples/locales/es.sqcat", "other"), "same file may be registered under explicit name");
+    check(messages.get("welcome", {{"playername", "Ana"}}) == "Hola, Ana.", "later registration preserves first default");
+    opensqcat::translator named_first;
+    check(named_first.load_text("root={$hint}\nhint=first", "", "first"), "prepare explicitly named first catalog");
+    check(named_first.get("root") == "first", "first named catalog becomes default");
+    check(named_first.load_text("hint=second", "", "second"), "load another named catalog");
+    check(named_first.get("hint") == "first", "later named catalog does not replace default");
+    expect(named_first, "{$first/root}", "first");
+    check(!named_first.set_default_catalog("missing") && named_first.default_catalog == "first",
+        "failed explicit default selection preserves default");
+    check(named_first.set_default_catalog("second") && named_first.get("hint") == "second", "select default explicitly");
+    check(named_first.load_text("hint=updated first", "", "first") && named_first.default_catalog == "second",
+        "reloading an existing catalog neither reorders nor changes default");
+    check(named_first.remove_catalog("second") && named_first.default_catalog == "first"
+        && named_first.get("hint") == "updated first", "removing default selects earliest remaining catalog");
+    check(named_first.remove_catalog("first") && named_first.default_catalog == "", "removing last named catalog resets empty default");
+    check(named_first.load_text("hint=new first", "", "new") && named_first.default_catalog == "new", "new first catalog becomes default after all removed");
+    check(named_first.load_text("hint=replace default") && named_first.get_from("new", "hint") == "replace default",
+        "unnamed load_text replaces currently selected default including named identity");
+    opensqcat::translator memory;
+    check(memory.load_text("hint=in memory") && memory.default_catalog == "", "unnamed load_text creates in-memory default");
+    check(memory.load_text("hint=later", "", "later") && memory.get("hint") == "in memory", "in-memory default remains first after named load");
+    check(memory.set_default_catalog("later") && memory.get("hint") == "later", "named catalog can be selected after in-memory default");
+    check(memory.load_text("root={change} {$hint}\nhint=first", "", "first")
+        && memory.load_text("hint=second", "", "second") && memory.set_default_catalog("first"), "prepare default mutation snapshot");
+    default_switcher switcher(memory);
+    memory.set_provider(switcher);
+    check(memory.get("root") == "changed first" && memory.default_catalog == "second", "default snapshot stable during callback selection");
+    check(memory.get("hint") == "second", "next operation uses callback-selected default");
+    check(messages.load("..\\examples\\locales\\es.sqcat") && messages.default_catalog == "es", "Windows path inference and reload retain name and order");
+    check(!messages.load("fixtures/absent.sqcat") && messages.error.catalog == "absent"
+        && messages.default_catalog == "es" && !messages.has_catalog("absent"), "failed inferred load does not become default");
+    check(!messages.load("fixtures/.sqcat") && messages.error.code == "argument", "empty inferred basename rejected");
+}
+
+void test_sources() {
+    opensqcat::translator messages;
+    counting_provider provider;
+    messages.set_provider(provider);
+    expect(messages, "{player}/{player}", "Ana/Ana");
+    check(provider.calls == 1, "provider cached once per field per operation");
+    provider.player = "Bob";
+    expect(messages, "{player}", "Bob");
+    check(provider.calls == 2, "next operation rereads provider");
+    dictionary general = {{"player", "general"}};
+    check(messages.set_variables(general), "install general fields");
+    general.set("player", "changed outside");
+    expect(messages, "{player}", "general");
+    expect(messages, "{player}", "temporary", {{"player", "temporary"}});
+    expect(messages, "{player}", "", {{"player", ""}});
+    expect(messages, "{player}", "0", {{"player", 0}});
+    expect(messages, "{player}", "false", {{"player", var(false)}});
+    expect(messages, "{flag == false}", "true", {{"flag", var(false)}});
+    check(provider.calls == 2, "present false/empty/zero values block provider");
+    string[] unsupported = {"no implicit object conversion"};
+    check(!messages.set_variables({{"player", @unsupported}}) && messages.error.code == "argument", "unsupported general values rejected");
+    expect(messages, "{player}", "general");
+    string output;
+    check(!messages.try_format("{player}", output, {{"player", @unsupported}})
+        && messages.error.code == "argument", "unsupported temporary values rejected");
+    check(!messages.try_format("{player}", output, {{"player", var()}})
+        && messages.error.code == "argument", "explicit missing values are not accepted as data");
+    check(messages.set_variables(null), "null clears general fields");
+    provider.missing = true;
+    uint before = provider.calls;
+    expect(messages, "{not player} {not player}", "true true");
+    check(provider.calls == before + 1, "missing provider results are also memoized");
+    provider.missing = false;
+    provider.invalid = true;
+    check(!messages.try_format("{player}", output) && messages.error.code == "provider", "invalid provider scalar rejected");
+    provider.invalid = false;
+    provider.throws = true;
+    check(!messages.try_format("{player}", output) && messages.error.code == "provider"
+        && messages.error.message.find("secret") < 0, "provider exception is isolated without leaking values");
+    messages.set_resolver(fixed_resolver);
+    expect(messages, "{player}", "callback");
+    messages.set_resolver(null);
+    expect(messages, "{player if player else 'guest'}", "guest");
+    // Native dictionary scalar import treats numeric/boolean entries as numbers.
+    // Native var preserves boolean type for output/equality.
+    expect(messages, "{a} {b}", "0 1", {{"a", false}, {"b", true}});
+    opensqcat::catalog replacement;
+    check(replacement.set("hi", "replacement"), "prepare replacement catalog");
+    messages.set_catalog(replacement);
+    check(messages.get("hi") == "replacement", "replace catalog explicitly");
+    messages.set_catalog(null);
+    check(!messages.has("hi"), "null installs empty catalog");
+    check(messages.set_variables({{"player", "\xff"}}) == false
+        && messages.error.code == "argument", "invalid UTF-8 data rejected");
+    double nonfinite = 1e300;
+    nonfinite *= nonfinite;
+    check(messages.set_variables({{"player", var(nonfinite)}}) == false,
+        "nonfinite numeric data rejected");
+
+    check(messages.load_text("root={trigger} {$hint} {stable} {trigger}\nhint=old"), "prepare mutation fixture");
+    check(messages.set_variables({{"stable", "old general"}}), "install stable general field");
+    mutating_provider mutating(messages);
+    messages.set_provider(mutating);
+    check(messages.get("root") == "changed old old general changed" && mutating.calls == 1,
+        "catalog, general fields, provider and resolved values stay stable across callbacks");
+    check(messages.get("root") == "next", "callback installation applies to next operation");
+}
+
+void test_variable_api() {
+    opensqcat::translator messages;
+    check(messages.set_variable("text", "Ana"), "typed string setter");
+    check(messages.set_variable("flag", false), "typed bool setter");
+    check(messages.set_variable("signed", int(-5)), "typed int setter");
+    check(messages.set_variable("unsigned", uint(5)), "typed uint setter");
+    check(messages.set_variable("large", int64(9007199254740993)), "typed int64 setter");
+    check(messages.set_variable("largest", uint64(18446744073709551615)), "typed uint64 setter");
+    check(messages.set_variable("fraction", float(1.5)), "typed float setter");
+    check(messages.set_variable("real", double(2.5)), "typed double setter");
+    expect(messages, "{text} {flag} {flag == false} {signed} {unsigned}", "Ana false true -5 5");
+    expect(messages, "{large} {largest} {fraction} {real}", "9007199254740993 18446744073709551615 1.5 2.5");
+    var shared("old");
+    check(messages.set_variable("copied", shared), "native var setter");
+    shared = "new";
+    expect(messages, "{copied}", "old");
+    check(!messages.set_variable("flag", var()) && messages.error.code == "argument", "empty var rejected transactionally");
+    check(!messages.set_variable("flag", var("\xff")), "invalid text setter rejected");
+    double nonfinite = 1e300;
+    nonfinite *= nonfinite;
+    check(!messages.set_variable("flag", nonfinite), "nonfinite typed setter rejected");
+    var@ absent;
+    check(!messages.set_variable("flag", absent), "null var setter rejected");
+    check(!messages.set_variable("", true) && !messages.set_variable("\xff", true), "invalid field names rejected");
+    expect(messages, "{flag}", "false");
+    check(!messages.set_variables({{"", "bad"}}) && !messages.set_variables({{"\xff", "bad"}}), "dictionary names validated transactionally");
+    expect(messages, "{text}", "Ana");
+    check(messages.remove_variable("text") && !messages.remove_variable("text"), "remove reports presence");
+    expect(messages, "{not text} {flag}", "true false");
+    check(messages.set_variables({{"replacement", "only"}}), "replace all general variables");
+    expect(messages, "{replacement} {not large}", "only true");
+    messages.clear_variables();
+    expect(messages, "{not replacement}", "true");
+    var exact(int64(9007199254740993));
+    check(messages.set_variables({{"large", @exact}, {"flag", var(false)}}), "native variants in general dictionary");
+    exact = int64(1);
+    expect(messages, "{large} {flag == false}", "9007199254740993 true");
+    expect(messages, "{large}", "18446744073709551615", {{"large", var(uint64(18446744073709551615))}});
+    expect(messages, "{'Ana' or 'visitor'} {'Ana' and 25} {not 0}", "true true true");
+    check(messages.load_text("dynamic={missing}\nempty=\nplain=raw {large}"), "prepare retrieval API fixture");
+    check(messages.get("dynamic") == "dynamic" && messages.error.code == "field", "convenience get returns key on rendering failure");
+    string output = "stale";
+    check(!messages.try_get("dynamic", output) && output == "" && messages.error.code == "field", "strict get clears failed output");
+    check(messages.get("empty") == "" && messages.error.code == "", "empty message remains successful");
+    check(messages.lookup("plain", output) && output == "raw {large}", "lookup leaves template raw");
+    check(messages.get("plain") == "raw 9007199254740993", "get evaluates catalog template");
+    check(messages.format("plain") == "plain", "format treats input as inline text");
+    check(messages.format("prefix {missing}") == "" && messages.error.code == "field", "inline convenience failure is empty");
+    native_provider provider;
+    messages.set_provider(provider);
+    expect(messages, "{first}/{change}/{first}", "9007199254740993/false/9007199254740993");
+    expect(messages, "{first == false}", "true");
+}
+
+void test_integer_precision() {
+    opensqcat::translator messages;
+    expect(messages, "{9007199254740993}", "9007199254740993");
+    expect(messages, "{9007199254740992 == 9007199254740993}", "false");
+    expect(messages, "{9223372036854775807}", "9223372036854775807");
+    expect(messages, "{-9223372036854775808}", "-9223372036854775808");
+    expect(messages, "{18446744073709551615}", "18446744073709551615");
+    expect(messages, "{-1 < 18446744073709551615}", "true");
+    expect(messages, "{9007199254740993 > 9007199254740992.0}", "true");
+    expect(messages, "{9007199254740992.0 < 9007199254740993}", "true");
+    // Use native binary boundaries: NVGT's decimal parser can round their
+    // decimal spellings downward. That conversion is not an exact-integer test.
+    check(messages.set_variable("signed_boundary", double(9223372036854775808.0)), "install signed real boundary");
+    check(messages.set_variable("unsigned_boundary", double(18446744073709551616.0)), "install unsigned real boundary");
+    expect(messages, "{9223372036854775807 < signed_boundary}", "true");
+    expect(messages, "{18446744073709551615 < unsigned_boundary}", "true");
+    expect(messages, "{signed_boundary > 9223372036854775807} {unsigned_boundary > 18446744073709551615}", "true true");
+    check(messages.set_variable("minimum", int64(-9223372036854775807) - 1), "install minimum native integer");
+    expect(messages, "{minimum} {minimum == -9223372036854775808}", "-9223372036854775808 true");
+    expect(messages, "{minimum == -9223372036854775808.0} {minimum < -1.5}", "true true");
+    expect(messages, "{18446744073709551615 > -1} {0 == 0.0} {0 > -0.5} {-2 < -1.5}", "true true true true");
+    expect(messages, "{18446744073709551615 > 9223372036854775807} {1 == 1.0} {false == 0}", "true true false");
+    expect(messages, "{1 == 1.0} {-1 > -1.5} {0 < 0.5}", "true true true");
+    string output;
+    check(!messages.try_format("{18446744073709551616}", output)
+        && messages.error.code == "syntax", "unsigned integer overflow rejected");
+    check(!messages.try_format("{-9223372036854775809}", output)
+        && messages.error.code == "syntax", "negative integer overflow rejected");
+}
+
+void test_shared_budget() {
+    opensqcat::translator messages;
+    opensqcat::evaluation_budget budget;
+    check(budget.steps == 0 && budget.bytes == 0 && !budget.exhausted, "new evaluation budget starts empty");
+    string chunk;
+    for (uint i = 0; i < 600000; i++) {
+        chunk += "x";
+    }
+    string text;
+    check(messages.try_format("{part}", text, {{"part", chunk}}, budget) && text == chunk,
+        "first operation uses shared output budget");
+    check(!messages.try_format("{part}", text, {{"part", chunk}}, budget)
+        && text == "" && messages.error.code == "limit" && budget.exhausted,
+        "second individually valid operation exhausts aggregate byte budget");
+    check(budget.bytes == 600000, "failed byte reservation does not partially consume bytes");
+    check(!messages.try_format("", text, null, budget) && messages.error.code == "limit", "exhausted budget stays exhausted even for empty text");
+    expect(messages, "fresh ordinary operation", "fresh ordinary operation");
+    opensqcat::evaluation_budget work;
+    check(work.consume(65535), "caller may account for surrounding work");
+    check(messages.try_format("{true}", text, null, work) && text == "true" && work.steps == 65536,
+        "last permitted evaluation step succeeds");
+    check(!messages.try_format("{true}", text, null, work) && work.exhausted && messages.error.code == "limit",
+        "steps accumulate between operations");
+    opensqcat::evaluation_budget overflow;
+    check(!overflow.consume(uint(-1), uint(-1)) && overflow.steps == 0 && overflow.bytes == 0 && overflow.exhausted,
+        "reservations check remaining capacity without integer overflow");
+    opensqcat::evaluation_budget retry;
+    check(!messages.try_format("{unknown}", text, null, retry) && !retry.exhausted,
+        "ordinary evaluation failure does not poison remaining budget");
+    check(messages.try_format("recovery", text, null, retry) && text == "recovery", "remaining budget usable after a field failure");
+    opensqcat::evaluation_budget syntax;
+    check(!messages.try_format("{", text, null, syntax) && syntax.steps == 0 && syntax.bytes == 0,
+        "template compilation is outside the evaluation budget");
+    check(messages.load_text("root={$common/part}") && messages.load_text("part={player}", "", "common"), "prepare shared-budget named references");
+    counting_provider provider;
+    messages.set_provider(provider);
+    opensqcat::evaluation_budget sources;
+    check(messages.get("root", null, sources) == "Ana" && messages.get_from("common", "part", null, sources) == "Ana"
+        && provider.calls == 2, "shared budget does not share field caches or snapshots across operations");
+    check(sources.bytes == 9, "nested and direct named text share byte accounting");
+    opensqcat::translator other;
+    check(other.format("other", null, sources) == "other" && sources.bytes == 14, "budget may span translator instances");
+    opensqcat::evaluation_budget strict_named;
+    check(messages.try_get_from("common", "part", text, null, strict_named)
+        && messages.try_format_from("common", "{$part}", text, null, strict_named), "strict named methods forward shared budget");
+    check(messages.format_from("common", "{$part}", null, strict_named) == "Ana" && strict_named.bytes == 15,
+        "inline named convenience method forwards shared budget");
+}
+
+void test_limits() {
+    opensqcat::translator messages;
+    string output;
+    string nested = "true";
+    for (uint i = 0; i < 100; i++) {
+        nested = "(" + nested + ")";
+    }
+    check(!messages.try_format("{" + nested + "}", output)
+        && messages.error.code == "syntax", "parse nesting bounded");
+    string chain = "true";
+    for (uint i = 0; i < 100; i++) {
+        chain += " and true";
+    }
+    check(!messages.try_format("{" + chain + "}", output)
+        && messages.error.code == "limit", "evaluation nesting bounded");
+    string catalog;
+    for (uint i = 0; i < 35; i++) {
+        catalog += "k" + i + "={$k" + (i + 1) + "}\n";
+    }
+    catalog += "k35=end";
+    check(messages.load_text(catalog), "deep reference catalog compiles");
+    check(!messages.try_get("k0", output) && messages.error.code == "limit", "reference depth bounded");
+    string big;
+    for (uint i = 0; i < 1048577; i++) {
+        big += "a";
+    }
+    check(!messages.try_format(big, output) && messages.error.code == "syntax", "template byte limit");
+    check(!messages.try_format("{x}{x}", output, {{"x", big}})
+        && messages.error.code == "limit" && output == "", "output limit rejects whole message");
+    string oversized_catalog = big;
+    for (uint i = 0; i < 4; i++) {
+        oversized_catalog += oversized_catalog;
+    }
+    check(!messages.load_text(oversized_catalog) && messages.error.code == "limit", "catalog input size bounded before parsing");
+    string many_nodes;
+    for (uint i = 0; i < 32769; i++) {
+        many_nodes += "{true}";
+    }
+    check(!messages.try_format(many_nodes, output) && messages.error.code == "syntax", "node count bounded independently of byte size");
+    string expansion = "k0=x\n";
+    for (uint i = 1; i < 20; i++) {
+        expansion += "k" + i + "={$k" + (i - 1) + "}{$k" + (i - 1) + "}\n";
+    }
+    check(messages.load_text(expansion), "prepare exponential reference graph");
+    check(!messages.try_get("k19", output) && messages.error.code == "limit" && output == "",
+        "shared evaluation budget bounds reference expansion");
+    expect(messages, "after limits", "after limits");
+}
+
+void main() {
+    println("NVGT " + NVGT_VERSION + " commit " + NVGT_VERSION_COMMIT_HASH);
+    test_catalog();
+    test_declarations();
+    test_expressions();
+    test_join();
+    test_references();
+    test_catalog_reference_syntax();
+    test_multiple_catalogs();
+    test_catalog_default_selection();
+    test_sources();
+    test_variable_api();
+    test_integer_precision();
+    test_shared_budget();
+    test_limits();
+    println("PASS: " + checks + " OpenSQCat contract checks");
+}

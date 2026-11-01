@@ -1,0 +1,7 @@
+// OpenSQCat public entry point.
+#include "opensqcat/scalars.nvgt"
+#include "opensqcat/values.nvgt"
+#include "opensqcat/budget.nvgt"
+#include "opensqcat/parser.nvgt"
+#include "opensqcat/catalog.nvgt"
+#include "opensqcat/translator.nvgt"

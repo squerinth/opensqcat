@@ -1,0 +1,67 @@
+namespace opensqcat {
+    interface field_provider {
+        bool resolve(const string&in name, var@&out result);
+    }
+
+    funcdef bool field_resolver(const string&in name, var@&out result);
+
+    namespace detail {
+        class callback_provider : field_provider {
+            private field_resolver@ callback;
+
+            callback_provider(field_resolver@ callback) {
+                @this.callback = callback;
+            }
+            bool resolve(const string&in name, var@&out result) override {
+                return callback(name, result);
+            }
+        }
+
+        const uint max_source_bytes = 1048576;
+        const uint max_catalog_bytes = 16777216;
+        const uint max_nodes = 32768;
+        const uint max_depth = 64;
+        const uint max_includes = 32;
+        const uint max_steps = 65536;
+        const uint max_output_bytes = 1048576;
+
+        bool read_value(dictionary@ source, const string&in key,
+            value@&out result) {
+            @result = null;
+            var@ wrapped;
+            if (source.get(key, @wrapped) && wrapped !is null) {
+                @result = from_native(wrapped);
+                return result !is null;
+            }
+            string text;
+            if (source.get(key, text)) {
+                @result = value(text);
+                return utf8valid(text, false);
+            }
+            double number;
+            if (source.get(key, number)) {
+                @result = value(number);
+                return is_finite(number);
+            }
+            return false;
+        }
+
+        bool copy_fields(dictionary@ source, dictionary@ destination,
+            string&out error) {
+            if (source is null) {
+                return true;
+            }
+            string[]@ keys = source.get_keys();
+            for (uint i = 0; i < keys.length(); i++) {
+                value@ item;
+                if (keys[i].length() == 0 || !utf8valid(keys[i], false)
+                    || !read_value(source, keys[i], item)) {
+                    error = "unsupported or invalid field: " + keys[i];
+                    return false;
+                }
+                destination.set(keys[i], @item);
+            }
+            return true;
+        }
+    }
+}

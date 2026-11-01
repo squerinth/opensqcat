@@ -1,0 +1,624 @@
+namespace opensqcat {
+    namespace detail {
+        class evaluation {
+            dictionary@ messages;
+            dictionary catalogs;
+            string default_catalog_name;
+            dictionary@ temporary;
+            dictionary@ general;
+            field_provider@ provider;
+            diagnostic@ error = diagnostic();
+            private dictionary resolved;
+            private string[] include_stack;
+            private string[] include_catalogs;
+            private string active_catalog;
+            evaluation_budget@ budget = evaluation_budget();
+
+            private bool fail(const string&in code, const string&in reason,
+                message@ owner, uint position = 1) {
+                if (error.code.length() == 0) {
+                    error.code = code;
+                    error.message = reason;
+                    error.catalog = active_catalog;
+                    if (owner !is null) {
+                        error.path = owner.path;
+                        error.key = owner.key;
+                        error.line = owner.line;
+                        error.column = owner.column + position - 1;
+                    }
+                }
+                return false;
+            }
+            private bool spend(message@ owner, uint position) {
+                if (error.code.length() > 0) {
+                    return false;
+                }
+                if (!budget.consume(1)) {
+                    return fail("limit", "evaluation step limit exceeded", owner, position);
+                }
+                return true;
+            }
+            private bool append(string&inout result, const string&in text,
+                message@ owner, uint position) {
+                if (!budget.consume(0, text.length())) {
+                    return fail("limit", "generated text byte limit exceeded", owner, position);
+                }
+                result += text;
+                return true;
+            }
+            private value@ field(const string&in name, message@ owner, uint position) {
+                value@ result;
+                if (resolved.get(name, @result)) {
+                    return result;
+                }
+                if (temporary.get(name, @result) || general.get(name, @result)) {
+                    resolved.set(name, @result);
+                    return result;
+                }
+                if (provider !is null) {
+                    bool found = false;
+                    var@ supplied;
+                    try {
+                        found = provider.resolve(name, supplied);
+                    }
+                    catch {
+                        fail("provider", "field provider threw for: " + name, owner, position);
+                        return value();
+                    }
+                    if (found) {
+                        @result = from_native(supplied);
+                        if (result is null) {
+                            fail("provider", "field provider returned an invalid scalar for: " + name,
+                                owner, position);
+                            return value();
+                        }
+                    }
+                    else {
+                        @result = value();
+                    }
+                }
+                else {
+                    @result = value();
+                }
+                resolved.set(name, @result);
+                return result;
+            }
+            private value@ compare(node@ expression, value@ left, value@ right, message@ owner) {
+                if (left.kind == missing_value || right.kind == missing_value) {
+                    fail("field", "comparison requires present fields", owner, expression.position);
+                    return value();
+                }
+                bool equality = expression.text == "==" || expression.text == "!=";
+                bool numbers = left.numeric() && right.numeric();
+                if (left.kind != right.kind && !numbers) {
+                    if (equality) {
+                        return value(expression.text == "!=");
+                    }
+                    fail("type", "ordered comparison requires matching types", owner, expression.position);
+                    return value();
+                }
+                int order = 0;
+                if (numbers) {
+                    order = numeric_order(left, right);
+                }
+                else if (left.kind == text_value) {
+                    order = left.as_text().opCmp(right.as_text());
+                }
+                else if (equality) {
+                    order = left.truth() == right.truth() ? 0 : 1;
+                }
+                else {
+                    fail("type", "ordered comparison requires text or numbers", owner, expression.position);
+                    return value();
+                }
+                bool result = false;
+                if (expression.text == "==") {
+                    result = order == 0;
+                }
+                else if (expression.text == "!=") {
+                    result = order != 0;
+                }
+                else if (expression.text == "<") {
+                    result = order < 0;
+                }
+                else if (expression.text == "<=") {
+                    result = order <= 0;
+                }
+                else if (expression.text == ">") {
+                    result = order > 0;
+                }
+                else {
+                    result = order >= 0;
+                }
+                return value(result);
+            }
+            private value@ combine(node@ expression, message@ owner, uint depth) {
+                value@ separator = evaluate(expression.arguments[0], owner, depth + 1);
+                if (error.code.length() > 0) {
+                    return value();
+                }
+                if (separator.kind == missing_value) {
+                    fail("field", "join separator is absent", owner, expression.arguments[0].position);
+                    return value();
+                }
+                if (separator.kind != text_value) {
+                    fail("type", "join separator must be text", owner, expression.arguments[0].position);
+                    return value();
+                }
+                string result;
+                bool started = false;
+                for (uint i = 1; i < expression.arguments.length(); i++) {
+                    node@ argument = expression.arguments[i];
+                    value@ item = evaluate(argument, owner, depth + 1);
+                    if (error.code.length() > 0) {
+                        return value();
+                    }
+                    string text = item.as_text();
+                    if (item.kind == missing_value || text.length() == 0) {
+                        continue;
+                    }
+                    if (started && !append(result, separator.as_text(), owner, argument.position)) {
+                        return value();
+                    }
+                    if (!append(result, text, owner, argument.position)) {
+                        return value();
+                    }
+                    started = true;
+                }
+                return value(result);
+            }
+            private value@ evaluate(node@ expression, message@ owner, uint depth) {
+                if (!spend(owner, expression.position)) {
+                    return value();
+                }
+                if (depth > max_depth) {
+                    fail("limit", "evaluation nesting limit exceeded", owner, expression.position);
+                    return value();
+                }
+                if (expression.kind == literal_node) {
+                    return expression.scalar;
+                }
+                if (expression.kind == field_node) {
+                    return field(expression.text, owner, expression.position);
+                }
+                if (expression.kind == reference_node) {
+                    string included;
+                    string target = expression.catalog_name.length() > 0 ? expression.catalog_name : active_catalog;
+                    if (!render_key(expression.text, included, owner, expression.position, target)) {
+                        return value();
+                    }
+                    return value(included);
+                }
+                if (expression.kind == join_node) {
+                    return combine(expression, owner, depth);
+                }
+                value@ left = evaluate(expression.left, owner, depth + 1);
+                if (error.code.length() > 0) {
+                    return value();
+                }
+                if (expression.kind == not_node) {
+                    return value(!left.truth());
+                }
+                if (expression.kind == conditional_node) {
+                    return evaluate(left.truth() ? expression.right : expression.alternative, owner, depth + 1);
+                }
+                if (expression.kind == and_node && !left.truth()) {
+                    return value(false);
+                }
+                if (expression.kind == or_node && left.truth()) {
+                    return value(true);
+                }
+                value@ right = evaluate(expression.right, owner, depth + 1);
+                if (error.code.length() > 0) {
+                    return value();
+                }
+                if (expression.kind == and_node || expression.kind == or_node) {
+                    return value(right.truth());
+                }
+                return compare(expression, left, right, owner);
+            }
+            bool render_message(message@ owner, string&out result) {
+                result = "";
+                for (uint i = 0; i < owner.compiled.parts.length(); i++) {
+                    node@ part = owner.compiled.parts[i];
+                    value@ item = evaluate(part, owner, 0);
+                    if (error.code.length() > 0) {
+                        result = "";
+                        return false;
+                    }
+                    if (item.kind == missing_value) {
+                        result = "";
+                        return fail("field", "unresolved field: " + part.text, owner, part.position);
+                    }
+                    if (!append(result, item.as_text(), owner, part.position)) {
+                        result = "";
+                        return false;
+                    }
+                }
+                return true;
+            }
+            bool render_inline(message@ owner, string&out result, const string&in catalog_name) {
+                string target = catalog_name.length() == 0 ? default_catalog_name : catalog_name;
+                dictionary@ selected;
+                if (target.length() > 0 && !catalogs.get(target, @selected)) {
+                    active_catalog = target;
+                    return fail("catalog", "catalog not found: " + target, owner);
+                }
+                active_catalog = target;
+                return render_message(owner, result);
+            }
+            bool render_key(const string&in key, string&out result,
+                message@ referring = null, uint position = 1, const string&in selected_name = "") {
+                result = "";
+                string catalog_name = selected_name.length() == 0 ? default_catalog_name : selected_name;
+                if (!spend(referring, position)) {
+                    return false;
+                }
+                for (uint i = 0; i < include_stack.length(); i++) {
+                    if (include_stack[i] == key && include_catalogs[i] == catalog_name) {
+                        return fail("cycle", "cyclic message reference: " + key, referring, position);
+                    }
+                }
+                if (include_stack.length() >= max_includes) {
+                    return fail("limit", "message reference depth exceeded", referring, position);
+                }
+                message@ owner;
+                dictionary@ selected = messages;
+                if (catalog_name.length() > 0 && !catalogs.get(catalog_name, @selected)) {
+                    fail("catalog", "catalog not found: " + catalog_name, referring, position);
+                    if (referring is null) {
+                        error.catalog = catalog_name;
+                        error.key = key;
+                    }
+                    return false;
+                }
+                if (!selected.get(key, @owner)) {
+                    fail("message", "message not found: " + key, referring, position);
+                    if (referring is null) {
+                        error.key = key;
+                        error.catalog = catalog_name;
+                    }
+                    return false;
+                }
+                include_stack.insert_last(key);
+                include_catalogs.insert_last(catalog_name);
+                string previous = active_catalog;
+                active_catalog = catalog_name;
+                bool valid = render_message(owner, result);
+                active_catalog = previous;
+                include_stack.remove_last();
+                include_catalogs.remove_last();
+                return valid;
+            }
+        }
+    }
+
+    class translator {
+        private catalog@ messages;
+        private dictionary named_catalogs;
+        private string[] catalog_order;
+        private string default_catalog_name;
+        private bool default_installed = false;
+        private dictionary general_fields;
+        private field_provider@ provider;
+        private diagnostic@ last_diagnostic = diagnostic();
+
+        translator(catalog@ messages = null) {
+            @this.messages = messages is null ? catalog() : messages;
+            default_installed = messages !is null;
+        }
+        diagnostic@ get_error() const property {
+            return last_diagnostic.copy();
+        }
+        void set_catalog(catalog@ source) {
+            @messages = source is null ? catalog() : source;
+            default_installed = true;
+            if (default_catalog_name.length() > 0) {
+                named_catalogs.set(default_catalog_name, @messages);
+            }
+            @last_diagnostic = diagnostic();
+        }
+        string get_default_catalog() const property {
+            return default_catalog_name;
+        }
+        bool set_default_catalog(const string&in name) {
+            catalog@ selected;
+            if (!named_catalogs.get(name, @selected)) {
+                @last_diagnostic = diagnostic();
+                last_diagnostic.code = "catalog";
+                last_diagnostic.catalog = name;
+                last_diagnostic.message = "catalog not found: " + name;
+                return false;
+            }
+            @messages = selected;
+            default_catalog_name = name;
+            default_installed = true;
+            @last_diagnostic = diagnostic();
+            return true;
+        }
+        private bool valid_catalog_name(const string&in name) {
+            if (!utf8valid(name, false)) {
+                @last_diagnostic = diagnostic();
+                last_diagnostic.code = "argument";
+                last_diagnostic.message = "catalog name must be valid UTF-8";
+                return false;
+            }
+            return true;
+        }
+        bool set_catalog(const string&in name, catalog@ source) {
+            if (!valid_catalog_name(name) || name.length() == 0) {
+                if (name.length() == 0) {
+                    @last_diagnostic = diagnostic();
+                    last_diagnostic.code = "argument";
+                    last_diagnostic.message = "named catalog requires a nonempty name";
+                }
+                return false;
+            }
+            catalog@ selected = source is null ? catalog() : source;
+            if (!named_catalogs.exists(name)) {
+                catalog_order.insert_last(name);
+            }
+            named_catalogs.set(name, @selected);
+            if (!default_installed || default_catalog_name == name) {
+                @messages = selected;
+                default_catalog_name = name;
+                default_installed = true;
+            }
+            @last_diagnostic = diagnostic();
+            return true;
+        }
+        bool remove_catalog(const string&in name) {
+            bool removed = named_catalogs.delete(name);
+            if (removed) {
+                for (uint i = 0; i < catalog_order.length(); i++) {
+                    if (catalog_order[i] == name) {
+                        catalog_order.remove_at(i);
+                        break;
+                    }
+                }
+                if (default_catalog_name == name) {
+                    default_catalog_name = "";
+                    default_installed = false;
+                    @messages = catalog();
+                    if (catalog_order.length() > 0) {
+                        set_default_catalog(catalog_order[0]);
+                    }
+                }
+            }
+            @last_diagnostic = diagnostic();
+            return removed;
+        }
+        bool has_catalog(const string&in name) const {
+            return name.length() == 0 || named_catalogs.exists(name);
+        }
+        void set_provider(field_provider@ source) {
+            @provider = source;
+            @last_diagnostic = diagnostic();
+        }
+        void set_resolver(field_resolver@ callback) {
+            if (callback is null) {
+                set_provider(null);
+            }
+            else {
+                set_provider(detail::callback_provider(callback));
+            }
+        }
+        bool set_variables(dictionary@ fields) {
+            dictionary staged;
+            string reason;
+            if (!detail::copy_fields(fields, staged, reason)) {
+                @last_diagnostic = diagnostic();
+                last_diagnostic.code = "argument";
+                last_diagnostic.message = reason;
+                return false;
+            }
+            general_fields = staged;
+            @last_diagnostic = diagnostic();
+            return true;
+        }
+        bool set_variable(const string&in name, var@ source) {
+            detail::value@ item = detail::from_native(source);
+            if (name.length() == 0 || !utf8valid(name, false) || item is null) {
+                @last_diagnostic = diagnostic();
+                last_diagnostic.code = "argument";
+                last_diagnostic.message = "invalid field name or value: " + name;
+                return false;
+            }
+            general_fields.set(name, @item);
+            @last_diagnostic = diagnostic();
+            return true;
+        }
+        bool set_variable(const string&in name, const string&in text) {
+            return set_variable(name, var(text));
+        }
+        bool set_variable(const string&in name, bool flag) {
+            return set_variable(name, var(flag));
+        }
+        bool set_variable(const string&in name, int number) {
+            return set_variable(name, var(number));
+        }
+        bool set_variable(const string&in name, uint number) {
+            return set_variable(name, var(number));
+        }
+        bool set_variable(const string&in name, int64 number) {
+            return set_variable(name, var(number));
+        }
+        bool set_variable(const string&in name, uint64 number) {
+            return set_variable(name, var(number));
+        }
+        bool set_variable(const string&in name, float number) {
+            return set_variable(name, var(number));
+        }
+        bool set_variable(const string&in name, double number) {
+            return set_variable(name, var(number));
+        }
+        bool remove_variable(const string&in name) {
+            bool removed = general_fields.delete(name);
+            @last_diagnostic = diagnostic();
+            return removed;
+        }
+        void clear_variables() {
+            general_fields.delete_all();
+            @last_diagnostic = diagnostic();
+        }
+        private catalog@ selected_catalog(const string&in name) const {
+            if (name.length() == 0) {
+                return messages;
+            }
+            catalog@ selected;
+            named_catalogs.get(name, @selected);
+            return selected;
+        }
+        private string file_catalog_name(const string&in path) {
+            uint start = 0;
+            for (uint i = 0; i < path.length(); i++) {
+                if (path.substr(i, 1) == "/" || path.substr(i, 1) == "\\") {
+                    start = i + 1;
+                }
+            }
+            string name = path.substr(start);
+            if (name.lower().ends_with(".sqcat")) {
+                name = name.substr(0, name.length() - 6);
+            }
+            return name;
+        }
+        bool load(const string&in path, const string&in name = "") {
+            string catalog_name = name.length() == 0 ? file_catalog_name(path) : name;
+            if (!valid_catalog_name(catalog_name) || catalog_name.length() == 0) {
+                if (catalog_name.length() == 0) {
+                    @last_diagnostic = diagnostic();
+                    last_diagnostic.code = "argument";
+                    last_diagnostic.message = "unable to infer a nonempty catalog name";
+                }
+                return false;
+            }
+            catalog@ selected = selected_catalog(catalog_name);
+            if (selected is null) {
+                @selected = catalog();
+            }
+            bool valid = selected.load(path);
+            if (valid) {
+                return set_catalog(catalog_name, selected);
+            }
+            @last_diagnostic = selected.error;
+            last_diagnostic.catalog = catalog_name;
+            return false;
+        }
+        bool load_text(const string&in source, const string&in origin = "", const string&in catalog_name = "") {
+            if (!valid_catalog_name(catalog_name)) {
+                return false;
+            }
+            catalog@ selected = selected_catalog(catalog_name);
+            if (selected is null) {
+                @selected = catalog();
+            }
+            bool valid = selected.load_text(source, origin);
+            if (valid) {
+                if (catalog_name.length() > 0) {
+                    return set_catalog(catalog_name, selected);
+                }
+                default_installed = true;
+                @last_diagnostic = diagnostic();
+                return true;
+            }
+            @last_diagnostic = selected.error;
+            last_diagnostic.catalog = catalog_name.length() == 0 ? default_catalog_name : catalog_name;
+            return false;
+        }
+        bool has(const string&in key) const {
+            return has_from("", key);
+        }
+        bool has_from(const string&in catalog_name, const string&in key) const {
+            catalog@ selected = selected_catalog(catalog_name);
+            return selected !is null && selected.contains(key);
+        }
+        bool lookup(const string&in key, string&out text) const {
+            return lookup_from("", key, text);
+        }
+        bool lookup_from(const string&in catalog_name, const string&in key, string&out text) const {
+            text = "";
+            catalog@ selected = selected_catalog(catalog_name);
+            return selected !is null && selected.lookup(key, text);
+        }
+        private detail::evaluation@ prepare(dictionary@ arguments, evaluation_budget@ budget) {
+            detail::evaluation@ state = detail::evaluation();
+            @state.budget = budget is null ? evaluation_budget() : budget;
+            if (state.budget.exhausted) {
+                state.error.code = "limit";
+                state.error.message = "evaluation budget is exhausted";
+                return state;
+            }
+            @state.messages = messages.snapshot();
+            state.default_catalog_name = default_catalog_name;
+            string[]@ names = named_catalogs.get_keys();
+            for (uint i = 0; i < names.length(); i++) {
+                catalog@ selected;
+                named_catalogs.get(names[i], @selected);
+                dictionary@ snapshot = selected.snapshot();
+                state.catalogs.set(names[i], @snapshot);
+            }
+            @state.provider = provider;
+            @state.general = dictionary();
+            state.general = general_fields;
+            @state.temporary = dictionary();
+            string reason;
+            if (!detail::copy_fields(arguments, state.temporary, reason)) {
+                state.error.code = "argument";
+                state.error.message = reason;
+            }
+            return state;
+        }
+        bool try_get(const string&in key, string&out text, dictionary@ arguments = null, evaluation_budget@ budget = null) {
+            return try_get_from("", key, text, arguments, budget);
+        }
+        bool try_get_from(const string&in catalog_name, const string&in key,
+            string&out text, dictionary@ arguments = null, evaluation_budget@ budget = null) {
+            text = "";
+            detail::evaluation@ state = prepare(arguments, budget);
+            bool valid = state.error.code.length() == 0 && state.render_key(key, text, null, 1, catalog_name);
+            @last_diagnostic = state.error.copy();
+            return valid;
+        }
+        string get(const string&in key, dictionary@ arguments = null, evaluation_budget@ budget = null) {
+            return get_from("", key, arguments, budget);
+        }
+        string get_from(const string&in catalog_name, const string&in key, dictionary@ arguments = null, evaluation_budget@ budget = null) {
+            string text;
+            if (!try_get_from(catalog_name, key, text, arguments, budget)) {
+                return key;
+            }
+            return text;
+        }
+        bool try_format(const string&in source, string&out text, dictionary@ arguments = null, evaluation_budget@ budget = null) {
+            return try_format_from("", source, text, arguments, budget);
+        }
+        bool try_format_from(const string&in catalog_name, const string&in source,
+            string&out text, dictionary@ arguments = null, evaluation_budget@ budget = null) {
+            text = "";
+            detail::parser parser(source);
+            detail::program@ compiled = parser.compile();
+            if (compiled is null) {
+                @last_diagnostic = diagnostic();
+                last_diagnostic.code = "syntax";
+                last_diagnostic.message = parser.error;
+                last_diagnostic.column = parser.error_column;
+                return false;
+            }
+            detail::message@ item = detail::message();
+            item.source = source;
+            @item.compiled = compiled;
+            detail::evaluation@ state = prepare(arguments, budget);
+            bool valid = state.error.code.length() == 0 && state.render_inline(item, text, catalog_name);
+            @last_diagnostic = state.error.copy();
+            return valid;
+        }
+        string format(const string&in source, dictionary@ arguments = null, evaluation_budget@ budget = null) {
+            return format_from("", source, arguments, budget);
+        }
+        string format_from(const string&in catalog_name, const string&in source, dictionary@ arguments = null, evaluation_budget@ budget = null) {
+            string text;
+            try_format_from(catalog_name, source, text, arguments, budget);
+            return text;
+        }
+    }
+}

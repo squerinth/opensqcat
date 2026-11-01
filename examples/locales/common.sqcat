@@ -1,0 +1,5 @@
+!sqcat_format_version 1
+
+# The caller chooses this catalog's registry name.
+hint = Pulsa Enter para continuar.
+help = {$hint}
