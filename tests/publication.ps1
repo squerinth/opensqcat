@@ -32,7 +32,7 @@ function Get-PackageReadme() {
 	} finally { $zip.Dispose() }
 }
 Build-PublicationFixture 'Nightly'
-if (-not (Get-PackageReadme).Contains('Nightly build targeting **0.2.0**')) { throw 'Nightly README does not distinguish target from stable.' }
+if (-not (Get-PackageReadme).Contains('Nightly prerelease:')) { throw 'Nightly README does not identify its release channel.' }
 $prepare = Join-Path $FixtureRoot 'tools/prepare-publication.ps1'
 $publish = Join-Path $FixtureRoot 'tools/publish-github-release.ps1'
 $output = Join-Path $FixtureRoot 'build/publication'
@@ -40,6 +40,7 @@ $version = (Get-Content -LiteralPath (Join-Path $FixtureRoot 'VERSION') -Raw).Tr
 $null = & $prepare -Kind Nightly -RefName main -VerificationLog $VerificationLog
 $nightly = Get-Content -LiteralPath (Join-Path $output 'manifest.json') -Raw | ConvertFrom-Json
 if (-not $nightly.prerelease -or $nightly.tag -notmatch '^nightly-\d{8}T\d{6}Z-[a-f0-9]{12}$' -or -not $nightly.asset.Contains($nightly.tag)) { throw 'Nightly identity is invalid.' }
+if (-not (Get-PackageReadme).Contains($nightly.tag)) { throw 'Nightly README does not identify the published build.' }
 $notes = Get-Content -LiteralPath (Join-Path $output 'notes.md') -Raw
 if ($notes -notmatch 'Stability is not guaranteed' -or -not $notes.Contains($nightly.commit) -or $notes -notmatch 'NVGT .+ commit [a-f0-9]{40}') { throw 'Nightly notes lack stability or provenance information.' }
 $firstManifest = Get-Content -LiteralPath (Join-Path $output 'manifest.json') -Raw

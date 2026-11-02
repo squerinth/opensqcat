@@ -2,8 +2,7 @@
 
 ## Unreleased
 
-- Verify development pushes and pull requests without publishing releases.
-- Identify development and nightly packages independently of stable release notes.
+- Packages identify their release channel and source revision in the README.
 
 ## 0.1.0
 
@@ -18,6 +17,4 @@ Initial release of OpenSQCat for NVGT.
 
 ## 0.1.1
 
-Small bugfixes and distribution improbements
-
-- Modified the distribution package: from now on, the license file and documentation are in the redistributable directory of OpenSQCat
+- Include the license and documentation in the installable library folder.

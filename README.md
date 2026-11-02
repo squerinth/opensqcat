@@ -15,13 +15,13 @@ and structured error diagnostics.
 Install NVGT from its [official releases](https://github.com/samtupy/nvgt/releases).
 Development and testing use NVGT's Latest/Bleeding Edge Development Version.
 OpenSQCat has been tested with NVGT `0.90.0-dev` on Windows; other builds and
-platforms have not been verified. Repository verification tools require Windows
-PowerShell; using the library does not require those tools.
+platforms have not been verified.
+Repository verification tools require Windows PowerShell; using the library does not require those tools.
 
 ## Installation
 
-Download an OpenSQCat ZIP from the
-[releases page](https://github.com/squerinth/opensqcat/releases) and extract it.
+Download the OpenSQCat ZIP from the
+[latest release](https://github.com/squerinth/opensqcat/releases/latest) and extract it.
 The archive has four top-level entries:
 
 ```
@@ -35,17 +35,8 @@ opensqcat.nvgt
 README.md
 ```
 
-The installable `opensqcat/` folder includes the library source, complete
+The redistributable `opensqcat/` folder includes the library source, complete
 documentation and license notice.
-
-Stable releases use numbered version tags. Automatic nightly prereleases
-identify a date and commit; they are development builds with no stability
-guarantee. Choose a stable release for normal use.
-
-Repository source may contain unreleased changes. The version targeted by
-development does not mean that a stable release with that number exists. Check
-the [latest stable release](https://github.com/squerinth/opensqcat/releases/latest)
-for published downloads; if none exists yet, only development builds are available.
 
 ### Project installation
 
@@ -93,7 +84,7 @@ balance = You have {money} coins.
 access = {"You can edit" if logged_in and (owner or admin) else "Read only"}
 ```
 
-Save this program as `hello.nvgt` beside `opensqcat/` and `locales/`:
+then, save this program as `hello.nvgt` beside `opensqcat/` and `locales/`:
 
 ```nvgt
 #pragma console

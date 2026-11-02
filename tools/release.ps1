@@ -68,10 +68,10 @@ try {
 	$buildDescription = switch ($Kind) {
 		'Nightly' {
 			$stamp = $archiveTime.ToString("yyyyMMdd'T'HHmmss'Z'")
-			"Nightly build targeting **$version**: ``nightly-$stamp-$($commit.Substring(0, 12))``. Stability is not guaranteed."
+			"Nightly prerelease: ``nightly-$stamp-$($commit.Substring(0, 12))``. Stability is not guaranteed."
 		}
 		'Stable' { "Stable release **$version** (``v$version``)." }
-		default { "Development snapshot targeting **$version**. This is not a stable release." }
+		default { 'Development snapshot.' }
 	}
 	$readme = $readme.TrimEnd() + "`n`n## Build information`n`n$buildDescription`n`nSource: $sourceDescription.`n"
 	[IO.File]::WriteAllText((Join-Path $releaseRoot 'README.md'), $readme, $utf8)

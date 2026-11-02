@@ -15,6 +15,9 @@ jobs:
   verify:
     runs-on: windows-2022
     timeout-minutes: 20
+    concurrency:
+      group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && github.ref || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/dev' }}
     defaults:
       run:
         shell: powershell
@@ -23,10 +26,22 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Select tool regressions
+        id: changes
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_REF_TYPE: ${{ github.ref_type }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          . ./tools/ci-changes.ps1
+          $tooling = Test-ToolingChanges -RepositoryRoot . -EventName $env:CI_EVENT -RefType $env:CI_REF_TYPE -Base $env:CI_BASE -Head $env:CI_HEAD
+          "tooling=$($tooling.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Verify release archive with latest NVGT
         env:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          RUN_TOOL_TESTS: ${{ steps.changes.outputs.tooling }}
         run: |
           if ($env:REF_TYPE -eq 'tag') {
             git merge-base --is-ancestor HEAD origin/main
@@ -37,8 +52,11 @@ jobs:
             $null = Get-StableReleaseNotes . $version
           }
           $nvgt = & tools/get-nvgt.ps1 -BuildDirectory "$env:RUNNER_TEMP/nvgt"
-          & tests/artifacts.ps1 -NvgtPath $nvgt
-          & tests/releases.ps1 -NvgtPath $nvgt
+          if ($env:RUN_TOOL_TESTS -eq 'true') {
+            & tests/workflow.ps1
+            & tests/artifacts.ps1 -NvgtPath $nvgt
+            & tests/releases.ps1 -NvgtPath $nvgt
+          } elseif ($env:RUN_TOOL_TESTS -ne 'false') { throw 'Missing tool regression selection.' }
           $kind = if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:REF_TYPE -eq 'tag') { 'Stable' } elseif ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/main') { 'Nightly' } else { 'Development' }
           & tools/release.ps1 -NvgtPath $nvgt -Revision HEAD -Kind $kind -BuildDirectory "$env:RUNNER_TEMP/opensqcat" | Tee-Object -FilePath build/verification.log
       - name: Prepare GitHub release files
@@ -50,6 +68,7 @@ jobs:
           $kind = if ($env:REF_TYPE -eq 'tag') { 'Stable' } else { 'Nightly' }
           & tools/prepare-publication.ps1 -Kind $kind -RefName $env:REF_NAME -VerificationLog build/verification.log
       - name: Upload verified archive and checksum
+        if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v'))
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: opensqcat-verified
