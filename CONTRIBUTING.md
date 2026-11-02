@@ -12,10 +12,7 @@ Feature requests are welcome. Explain the use case and the problem you want to s
 ## Pull requests
 
 Target `main` when opening a pull request, including contributions from forks.
-Maintainer development takes place on `dev` and reaches `main` through a pull
-request. The protected `main` branch requires the GitHub Actions `verify` check
-to pass before merging. Pushes to `dev` and pull requests run verification
-without publishing; a successful push to `main` publishes a nightly prerelease.
+The GitHub Actions `verify` check must pass before merging.
 
 Small fixes, documentation improvements, and focused changes can be submitted directly. Please discuss substantial API changes, architectural changes, new dependencies, or major features in an issue before investing significant work in them.
 

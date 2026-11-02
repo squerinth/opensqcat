@@ -24,7 +24,7 @@ catalog selects the first successful load or named registration automatically
 unless a default has already been installed explicitly.
 
 `set_provider` retains the supplied provider; null removes it. `set_resolver`
-installs a function or delegate through an internal provider, replacing any
+installs a function or delegate, replacing any
 previous provider. Null removes the provider. These configuration changes clear
 `error` and apply to the next formatting operation.
 

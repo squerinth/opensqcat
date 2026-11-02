@@ -17,8 +17,7 @@ required to use the library and are not included in release ZIPs.
 | `build/` | Temporary fixtures, compiler cache and package staging. |
 | `release/` | Generated ZIPs and checksums. |
 
-Generated files are ignored by Git. Empty `.gitkeep` files preserve the workspace
-folders in a checkout; those placeholders are not part of the library package.
+Generated files are ignored by Git.
 
 ## Verification
 
@@ -40,12 +39,10 @@ fragments and source includes. External URLs are not checked.
 
 Project installation is checked on every run. After changing includes, the global
 wrapper or the distribution layout, add `-CheckGlobalInstallation` to test an
-isolated global installation. The release packager runs that check once for the
-candidate ZIP; routine verification does not copy the compiler.
+isolated global installation. The release packager includes that check.
 
 Temporary workspaces are removed on success and failure. Use `-KeepArtifacts`
 when debugging to retain the run and print its location, then remove it manually.
-The runner restores `TEMP` and `TMP` before cleanup.
 
 ## Compiler setup
 
@@ -57,15 +54,9 @@ $nvgt = & ./tools/get-nvgt.ps1
 & ./tools/test.ps1 -NvgtPath $nvgt
 ```
 
-The helper queries the official `latest` development release, verifies the
-installer checksum and extracts the executable, runtime libraries and includes.
-It reports the compiler identity and returns only its path on the success stream.
-No NVGT version or commit is pinned in the repository. Internet access is required.
-
-One extraction is cached under `build/toolchain/current/` and reused while the
-upstream installer checksum is unchanged. A verified replacement supersedes the
-old extraction; failed setup preserves the previous one. Temporary downloads and
-extraction files are removed. `-BuildDirectory <path>` changes the cache location.
+The helper downloads and verifies the latest development compiler, caches it
+under `build/toolchain/current/` and returns its executable path. Internet access
+is required to check for updates. `-BuildDirectory <path>` changes the cache location.
 Keep paths short to avoid NVGT's Windows path-length limitations. Do not refresh
 a shared cache while another process is using its compiler.
 
@@ -98,58 +89,35 @@ When changing the distribution layout or packaging tools, verify a package with:
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/release.ps1 -NvgtPath C:/nvgt/nvgt.exe
 ```
 
-The default packages the current working files. `-Revision <ref>` selects a Git
-commit or tag instead. `VERSION` is the target version of the code, not a claim
-that this stable version has been published. The changelog may keep development
-changes under `Unreleased` while retaining older release sections. The README
-links to available releases without maintaining a separate version number.
-Without a supplied compiler, the packager obtains the current NVGT
-development build automatically.
-
-Local packages default to `-Kind Development`. CI selects `Nightly` for main
-pushes and `Stable` for version tags. Nightly and stable packages require a
-committed `-Revision`; only stable packages require a nonempty changelog section
-matching `VERSION`. The stable tag must also match that version. Every package
-adds generated build information to its README, identifying its channel and
-source. A nightly targeting a future version remains a prerelease.
+The default packages the current working files as a development snapshot.
+`-Revision <ref>` selects a Git commit or tag. The package version comes from
+`VERSION`; its README identifies the build and source revision. Without a
+supplied compiler, the packager obtains the current NVGT development build.
 
 The resulting `release/opensqcat-<version>.zip` has exactly four top-level
 entries: `opensqcat/`, `examples/`, `opensqcat.nvgt` and `README.md`. The installable
 `opensqcat/` folder contains the entry point, the inner implementation folder,
 `docs/` and `LICENSE`, so copying it preserves the license and documentation.
-The repository's `doc/` and root license remain the packaging sources. Tests,
-tools, workspace folders and repository metadata are excluded. README links and
-the example's include are adjusted for the distribution layout.
+Tests, tools, workspace folders and repository metadata are excluded.
 
 The packager extracts and verifies the ZIP, including global installation, before
-writing it and its SHA-256 sidecar to `release/`. Failed verification leaves any
-previous finished output intact. Entry order and timestamps are fixed so the same
-source and toolchain produce repeatable archives within each packaging mode.
-Staging is cleaned unless `-KeepArtifacts` is supplied.
+writing it and its SHA-256 sidecar to `release/`. Use `-KeepArtifacts` to retain
+the staging directory for debugging.
 
 For changes to the development tools, run their additional regression suites:
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/workflow.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/artifacts.ps1 -NvgtPath C:/nvgt/nvgt.exe
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/releases.ps1 -NvgtPath C:/nvgt/nvgt.exe
 ```
 
-These check temporary cleanup, compiler-cache reuse, package contents,
-repeatability, checksums and preservation of an earlier ZIP on failure. Packaging
-regressions skip repeated global-installation checks; the candidate package keeps
-that check enabled. Test workspaces are removed by default.
+These check compiler setup, temporary cleanup, package contents, reproducibility,
+checksums and publication behavior.
 
 ## Continuous integration
 
-The GitHub Actions workflow runs on pull requests targeting `main`, pushes to
-`dev` and `main`, version-tag
-pushes and manual requests. It uses Windows and the latest NVGT development build
-to run the verification and tool regression suites against an extracted package.
-Consult the run's logs for compiler identity and failure diagnostics.
-
-Successful pushes to `main` publish development prereleases without a stability
-guarantee. Stable releases use version tags matching `VERSION` on commits already
-merged into `main`. Pushes to `dev`, pull requests and manual verification runs
-do not publish. The required `verify` check keeps its name across these events.
-Downloadable packages include the ZIP
-and checksum; GitHub's source archives use the repository layout instead.
+The `verify` check runs on pull requests targeting `main`. It uses Windows and
+the latest NVGT development build to run verification and tool regression suites
+against an extracted package. Consult the run's logs for compiler identity and
+failure diagnostics.

@@ -38,7 +38,7 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 Copy-Item -LiteralPath $archive -Destination (Join-Path $OutputDirectory $assetName) -Force
 [IO.File]::WriteAllText((Join-Path $OutputDirectory "$assetName.sha256"), "$hash  $assetName`n", $utf8)
 $description = if ($nightly) {
-	"Automated development build from main targeting $version. This target is not an announcement of a stable release. Stability is not guaranteed."
+	'Nightly prerelease. Stability is not guaranteed.'
 } else {
 	$stableNotes
 }

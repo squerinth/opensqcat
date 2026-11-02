@@ -42,11 +42,8 @@ dictionary fields = {
 };
 ```
 
-In the tested NVGT development builds, dictionary retrieval converts numeric
-types without exposing their original type to this API. OpenSQCat does not
-infer bool from 0/1. Use typed setters for general fields, or
-`var` for exact types in per-message arguments. Plain numeric entries remain
-useful for ordinary amounts and conditions.
+Use typed setters for general fields, or `var` for exact types in per-message
+arguments. Plain numeric entries are suitable for ordinary amounts and conditions.
 
 Field names must be nonempty UTF-8; names are case-sensitive. They need not be
 catalog keys. Templates can reference only names allowed by the format's

@@ -17,6 +17,21 @@ try {
 		Copy-Item -LiteralPath (Join-Path $root $item) -Destination $probe -Recurse
 	}
 	$utf8 = [Text.UTF8Encoding]::new($false)
+	# Replace only the verifier in the disposable repository. Production packaging
+	# still invokes the real verifier unconditionally for its final candidate.
+	$verifier = @'
+param([string]$NvgtPath, [string]$BuildDirectory, [string]$DistributionPath, [switch]$CheckGlobalInstallation, [switch]$KeepArtifacts)
+$ErrorActionPreference = 'Stop'
+if ($CheckGlobalInstallation) { throw 'Packaging regression repeated the global installation check.' }
+if ([string]::IsNullOrWhiteSpace($DistributionPath)) { throw 'Packager did not pass an extracted distribution.' }
+foreach ($required in @('opensqcat/opensqcat.nvgt', 'opensqcat/opensqcat/translator.nvgt', 'opensqcat/LICENSE', 'opensqcat/docs/README.md', 'examples/messages.nvgt', 'opensqcat.nvgt', 'README.md')) {
+	if (-not (Test-Path -LiteralPath (Join-Path $DistributionPath $required) -PathType Leaf)) { throw "Missing distribution content: $required" }
+}
+if (Test-Path -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'tests/reject-package-verification')) { throw 'Synthetic package verification failure.' }
+Write-Output ('NVGT fixture commit ' + ('a' * 40))
+Write-Output 'PASS: package verifier test double'
+'@
+	[IO.File]::WriteAllText((Join-Path $probe 'tools/test.ps1'), $verifier, $utf8)
 	foreach ($workspace in @('build', 'release', '.agent-work')) {
 		New-Item -ItemType Directory -Path (Join-Path $probe $workspace) | Out-Null
 		[IO.File]::WriteAllText((Join-Path $probe "$workspace/.gitkeep"), '', $utf8)
@@ -31,6 +46,7 @@ try {
 	$tool = Join-Path $probe 'tools/release.ps1'
 	$results = @(& $tool @retentionOptions -SkipGlobalInstallationCheck -NvgtPath $NvgtPath -Revision HEAD -BuildDirectory $buildDirectory)
 	$results | Write-Output
+	if (@($results | Where-Object { $_ -ceq 'PASS: package verifier test double' }).Count -ne 1) { throw 'Packager must invoke the verifier exactly once.' }
 	if (@($results | Where-Object { $_ -ceq 'PASS: global installation' }).Count -ne 0) { throw 'Packaging regression repeated the global installation check.' }
 	if (-not $KeepArtifacts -and @(Get-ChildItem -LiteralPath $buildDirectory -Directory).Count -ne 0) { throw 'Successful release retained temporary directories.' }
 	$version = (Get-Content -LiteralPath (Join-Path $probe 'VERSION') -Raw).Trim()
@@ -97,6 +113,14 @@ try {
 	if ($failedExit -eq 0 -or ($failure -join "`n") -notmatch 'Release omits license') { throw 'Missing license was not rejected.' }
 	if ((Get-FileHash -LiteralPath $archive).Hash -cne $firstHash) { throw 'License failure replaced a verified release.' }
 	Write-Output 'PASS: omitted license rejected; previous release preserved'
+
+	# A verifier failure must propagate and preserve the previous finished ZIP.
+	[IO.File]::WriteAllText((Join-Path $probe 'tests/reject-package-verification'), '', $utf8)
+	$failed = $false
+	try { $null = & $tool @retentionOptions -SkipGlobalInstallationCheck -NvgtPath $NvgtPath -BuildDirectory $buildDirectory } catch { $failed = $_.Exception.Message -match 'Synthetic package verification failure' }
+	if (-not $failed -or (Get-FileHash -LiteralPath $archive).Hash -cne $firstHash) { throw 'Verifier failure did not preserve the finished release.' }
+	Remove-Item -LiteralPath (Join-Path $probe 'tests/reject-package-verification')
+	Write-Output 'PASS: package verification is mandatory and failure preserves the previous release'
 
 	# Default mode must include local documentation changes without requiring a commit.
 	$workingDocument = Join-Path $probe 'doc/advanced/README.md'
