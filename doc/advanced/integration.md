@@ -7,9 +7,13 @@ decisions for applications. For a guided first program, start with the
 
 ## Load and select catalogs
 
-`load("locales/en.sqcat")` registers a catalog as `en`. The first installed catalog
-becomes the default; later loads leave that selection unchanged. Paths are used
-as supplied. Applications choose their own directory layout and language policy.
+`load("locales/en.sqcat")` registers a catalog as `en`. The first successfully
+loaded named catalog becomes the default only if no default was installed
+explicitly earlier; later named loads leave that selection unchanged. A
+non-null `translator(catalog@)` argument, `set_catalog(catalog@)`,
+`set_default_catalog(name)` or successful `load_text` with an empty
+`catalog_name` explicitly installs or replaces the default. Paths are used as
+supplied. Applications choose their own directory layout and language policy.
 
 Use `set_default_catalog("en")` to select a loaded catalog. Use
 `get_from("common", "hint")` to retrieve from another catalog explicitly. Inside
@@ -18,8 +22,8 @@ references a loaded catalog named `common`. These references do not load files.
 
 Check the boolean return from loading and selection operations. A failed load
 preserves the previous catalog and default selection. For naming, replacement
-and removal rules, see [catalog management](../api/translator.md#catalog-management)
-and [loading](../api/translator.md#loading-and-raw-lookup).
+and removal rules, see [catalog management](../api/opensqcat/Classes/translator/Methods/set_catalog.md)
+and [loading](../api/opensqcat/Classes/translator/Methods/load.md).
 
 ## Supply application values
 
@@ -38,7 +42,7 @@ Dictionary strings are text. Plain dictionary numbers and booleans use NVGT's
 double-precision conversion; false/true become 0/1, and large integers can lose
 precision. Typed setters preserve booleans and 64-bit integers. Use native `var`
 for exact types in temporary dictionaries, such as `{{"logged_in", var(true)}}`.
-See [values and providers](../api/values.md) for validation and lifetime rules.
+See [values and providers](../api/concepts/field-values.md) for validation and lifetime rules.
 
 ## Retrieve text and handle failures
 
@@ -51,7 +55,7 @@ output and set `error`. Successful evaluations clear `error`. Valid messages can
 produce empty text, so output length alone does not establish success.
 
 Inspect `error.code`, `message`, `path`, `catalog`, `key`, `line` and `column` as
-needed. See [diagnostics](../api/diagnostics.md). The library returns diagnostics
+needed. See [diagnostics](../api/concepts/diagnostics.md). The library returns diagnostics
 without logging them. Applications decide whether to display an error, choose a
 fallback language or supply alternative text; no automatic fallback is installed.
 
@@ -66,5 +70,5 @@ directives and numeric behavior. OpenSQCat supports SQCat 1 and recognizes only
 `!sqcat_format_version`. Unknown optional directives are ignored; unknown required
 directives fail loading. There is no application directive registry.
 
-Evaluation has [resource limits](../api/diagnostics.md#limits). An optional
-[shared budget](../api/budget.md) bounds work across several rendering calls.
+Evaluation has [resource limits](../api/concepts/diagnostics.md#limits). An optional
+[shared budget](../api/opensqcat/Classes/evaluation_budget/!evaluation_budget.md) bounds work across several rendering calls.

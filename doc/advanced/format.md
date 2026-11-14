@@ -22,7 +22,7 @@ limits are linked separately.
 A catalog is a case-sensitive map of message keys to text templates. Its contents
 are interpreted independently of its file name or directory. OpenSQCat's
 `translator.load(path)` uses the file name to choose a catalog registration name
-when the caller omits an explicit name; see [catalog loading](../api/translator.md#loading-and-raw-lookup).
+when the caller omits an explicit name; see [catalog loading](../api/opensqcat/Classes/translator/Methods/load.md).
 
 ## File structure
 
@@ -207,10 +207,14 @@ Missing catalogs/messages and cycles fail the operation. Cycle identity is the
 pair catalog name and key, so equal keys in different catalogs do not collide.
 All included messages share the field cache and evaluation budgets.
 
-**OpenSQCat:** the first installed catalog is the default. `load(path)` infers its
-name from the filename without `.sqcat`; explicit names override that inference.
-Caller APIs select roots with `get_from(catalog_name, key)`, keeping keys literal.
-See [catalog management](../api/translator.md#catalog-management).
+**OpenSQCat:** `load(path)` infers a name from the filename without `.sqcat` and
+registers the catalog under that name. The first successfully loaded or named
+registration becomes the default only if no default was explicitly installed
+earlier. A non-null `translator(catalog@)` argument, `set_catalog(catalog@)`,
+`set_default_catalog(name)` or successful `load_text` with an empty
+`catalog_name` explicitly installs or replaces the default. Caller APIs select
+roots with `get_from(catalog_name, key)`, keeping keys literal. See
+[catalog management](../api/opensqcat/Classes/translator/Methods/set_catalog.md).
 
 ## Expressions
 
@@ -293,7 +297,7 @@ literals that overflow or underflow to zero are rejected. Decimal conversion use
 NVGT's `parse_double`; its rounding can differ from AngelScript source literals,
 including near 64-bit boundaries. Real values are approximate; use integer
 literals or typed integer fields for exact counts and identifiers. Plain numeric
-dictionary entries also undergo double conversion; see [field values](../api/values.md).
+dictionary entries also undergo double conversion; see [field values](../api/concepts/field-values.md).
 
 Integers format as decimal digits; real numbers use NVGT's double-to-string
 conversion. Neither applies locale-specific currency or numeric formatting.
@@ -326,4 +330,4 @@ The name `join` remains usable as a field when not followed by `(`. There are no
 arbitrary function calls, property access, assignments, arithmetic,
 concatenation operators, loops, file operations or format specifiers in expressions.
 Compose output by placing literal text, fields and references next to each other.
-Evaluation limits are documented in [diagnostics and limits](../api/diagnostics.md).
+Evaluation limits are documented in [diagnostics and limits](../api/concepts/diagnostics.md).

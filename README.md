@@ -121,7 +121,7 @@ You can edit
 
 Temporary dictionary arguments use NVGT's numeric conversion for plain numbers
 and booleans. Use `var(true)` to preserve a boolean and `var(int64(...))` or
-`var(uint64(...))` for exact 64-bit integers. See [field values](doc/api/values.md#dictionary-arguments).
+`var(uint64(...))` for exact 64-bit integers. See [field values](doc/api/concepts/field-values.md#dictionary-arguments).
 
 ## Documentation
 

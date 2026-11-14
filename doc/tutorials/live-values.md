@@ -50,4 +50,4 @@ select the explicitly loaded `common` catalog.
 
 For field precedence and caching decisions, read
 [application integration](../advanced/integration.md). For the callback signature
-and failure behavior, consult [field_resolver](../api/values.md#field_resolver).
+and failure behavior, consult [field_resolver](../api/opensqcat/Funcdefs/field_resolver.md).

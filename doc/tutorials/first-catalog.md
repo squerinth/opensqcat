@@ -76,4 +76,4 @@ Change the player name or coin count and run it again. Then add a `missing`
 entry to the catalog: the final error line will disappear.
 
 Continue with [live application values](live-values.md). For the exact retrieval
-contract, see [message retrieval](../api/translator.md#getting-translated-messages).
+contract, see [message retrieval](../api/opensqcat/Classes/translator/Methods/get.md).
