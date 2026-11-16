@@ -24,7 +24,7 @@ param([string]$NvgtPath, [string]$BuildDirectory, [string]$DistributionPath, [sw
 $ErrorActionPreference = 'Stop'
 if ($CheckGlobalInstallation) { throw 'Packaging regression repeated the global installation check.' }
 if ([string]::IsNullOrWhiteSpace($DistributionPath)) { throw 'Packager did not pass an extracted distribution.' }
-foreach ($required in @('opensqcat/opensqcat.nvgt', 'opensqcat/opensqcat/translator.nvgt', 'opensqcat/LICENSE', 'opensqcat/docs/README.md', 'examples/messages.nvgt', 'opensqcat.nvgt', 'README.md')) {
+foreach ($required in @('opensqcat/opensqcat.nvgt', 'opensqcat/opensqcat/translator.nvgt', 'opensqcat/LICENSE', 'examples/messages.nvgt', 'opensqcat.nvgt', 'README.md')) {
 	if (-not (Test-Path -LiteralPath (Join-Path $DistributionPath $required) -PathType Leaf)) { throw "Missing distribution content: $required" }
 }
 if (Test-Path -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'tests/reject-package-verification')) { throw 'Synthetic package verification failure.' }
@@ -73,10 +73,7 @@ Write-Output 'PASS: package verifier test double'
 			'opensqcat.nvgt',
 			'README.md',
 			'opensqcat/LICENSE',
-			'examples/README.md',
 			'examples/messages.nvgt',
-			'examples/getting-started/main.nvgt',
-			'examples/getting-started/locales/en.sqcat',
 			'examples/quick-start/main.nvgt',
 			'examples/quick-start/locales/en.sqcat',
 			'examples/expressive-messages/main.nvgt',
@@ -88,7 +85,6 @@ Write-Output 'PASS: package verifier test double'
 			'examples/catalog-references/main.nvgt',
 			'examples/catalog-references/locales/en.sqcat',
 			'examples/catalog-references/locales/common.sqcat',
-			'opensqcat/docs/README.md',
 			'opensqcat/docs/api/README.md',
 			'opensqcat/docs/tutorials/first-catalog.md',
 			'opensqcat/docs/tutorials/live-values.md',

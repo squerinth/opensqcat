@@ -77,7 +77,6 @@ try {
 	[IO.File]::WriteAllText((Join-Path $releaseRoot 'README.md'), $readme, $utf8)
 	$exampleIncludes = @(
 		@{ Path = 'examples/messages.nvgt'; Source = '../src/opensqcat.nvgt'; Release = '../opensqcat/opensqcat.nvgt' },
-		@{ Path = 'examples/getting-started/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
 		@{ Path = 'examples/quick-start/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
 		@{ Path = 'examples/expressive-messages/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
 		@{ Path = 'examples/per-call-fields/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
@@ -98,7 +97,6 @@ try {
 
 	if ($documents.Count -eq 0) { throw 'Release must contain documentation.' }
 	foreach ($required in @(
-		'doc/README.md',
 		'doc/api/README.md',
 		'doc/tutorials/first-catalog.md',
 		'doc/tutorials/live-values.md',

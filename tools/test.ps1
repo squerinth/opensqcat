@@ -194,16 +194,15 @@ try {
 		throw 'OpenSQCat example output differs from its expected message text.'
 	}
 	$exampleOutput | Write-Output
-	# Test the getting-started guide's catalog and program together.
+	# Test the README's catalog and program examples together.
 	$null = Get-SourceVersion $packageRoot
 	Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'readme-quick-start') $NvgtPath -ExampleIndex 0
 	Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'readme-expressive-messages') $NvgtPath -ExampleIndex 1
-	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/README.md") (Join-Path $packageRoot 'getting-started-project') $NvgtPath
 	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/tutorials/first-catalog.md") (Join-Path $packageRoot 'tutorial-project') $NvgtPath
 	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/tutorials/live-values.md") (Join-Path $packageRoot 'live-values-project') $NvgtPath
 	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/tutorials/catalog-references.md") (Join-Path $packageRoot 'catalog-references-project') $NvgtPath -CatalogNames @('en', 'common')
 
-	Write-Output 'PASS: project installation; README, getting-started and tutorial dialog contents'
+	Write-Output 'PASS: project installation; README and tutorial dialog contents'
 	if ($CheckGlobalInstallation) {
 		# Check conventional global includes from an unrelated project, without
 		# changing the caller's NVGT installation or include configuration.
@@ -220,7 +219,6 @@ try {
 		} else {
 			[IO.File]::WriteAllText($globalWrapper, "#include `"opensqcat/opensqcat.nvgt`"`n", [Text.UTF8Encoding]::new($false))
 		}
-		Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/README.md") (Join-Path $runRoot 'global-project') (Join-Path $engineRoot 'nvgt.exe') -GlobalInclude
 		Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'global-readme-project') (Join-Path $engineRoot 'nvgt.exe') -GlobalInclude -ExampleIndex 0
 		Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'global-readme-expressive-messages') (Join-Path $engineRoot 'nvgt.exe') -GlobalInclude -ExampleIndex 1
 		Write-Output 'PASS: global installation'
