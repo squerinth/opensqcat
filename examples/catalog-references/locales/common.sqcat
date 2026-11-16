@@ -1,0 +1,4 @@
+!sqcat_format_version 1
+
+controls = Use the arrow keys to move. {$confirm}
+confirm = Press Enter to continue.

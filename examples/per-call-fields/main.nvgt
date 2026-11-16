@@ -1,0 +1,24 @@
+#include "../../src/opensqcat.nvgt"
+
+void main() {
+	opensqcat::translator messages;
+	if (!messages.load("locales/en.sqcat")) {
+		alert("OpenSQCat", messages.error.message);
+		return;
+	}
+	if (!messages.set_variable("playername", "Alex")) {
+		alert("OpenSQCat", messages.error.message);
+		return;
+	}
+
+	alert("Welcome", messages.get("welcome"));
+	alert("Balance", messages.get("balance", {{"money", 3}, {"playername", "Sam"}}));
+	alert("Welcome", messages.get("welcome"));
+
+	string missing;
+	if (messages.try_get("missing", missing)) {
+		alert("Missing message", missing);
+	} else {
+		alert("Missing message", "Missing message: " + messages.error.key);
+	}
+}

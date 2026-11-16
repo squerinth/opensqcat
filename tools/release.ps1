@@ -75,18 +75,38 @@ try {
 	}
 	$readme = $readme.TrimEnd() + "`n`n## Build information`n`n$buildDescription`n`nSource: $sourceDescription.`n"
 	[IO.File]::WriteAllText((Join-Path $releaseRoot 'README.md'), $readme, $utf8)
-	foreach ($script in @('examples/messages.nvgt')) {
-		$path = Join-Path $releaseRoot $script
+	$exampleIncludes = @(
+		@{ Path = 'examples/messages.nvgt'; Source = '../src/opensqcat.nvgt'; Release = '../opensqcat/opensqcat.nvgt' },
+		@{ Path = 'examples/getting-started/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
+		@{ Path = 'examples/quick-start/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
+		@{ Path = 'examples/expressive-messages/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
+		@{ Path = 'examples/per-call-fields/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
+		@{ Path = 'examples/live-values/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' },
+		@{ Path = 'examples/catalog-references/main.nvgt'; Source = '../../src/opensqcat.nvgt'; Release = '../../opensqcat/opensqcat.nvgt' }
+	)
+	foreach ($example in $exampleIncludes) {
+		$path = Join-Path $releaseRoot $example.Path
 		$content = [IO.File]::ReadAllText($path)
-		if (-not $content.Contains('#include "../src/opensqcat.nvgt"')) {
-			throw "Expected repository include missing in $script"
+		$sourceDirective = '#include "' + $example.Source + '"'
+		$releaseDirective = '#include "' + $example.Release + '"'
+		if (-not $content.Contains($sourceDirective)) {
+			throw "Expected repository include missing in $($example.Path)"
 		}
-		[IO.File]::WriteAllText($path, $content.Replace('#include "../src/opensqcat.nvgt"', '#include "../opensqcat/opensqcat.nvgt"'), $utf8)
+		[IO.File]::WriteAllText($path, $content.Replace($sourceDirective, $releaseDirective), $utf8)
 	}
 	[IO.File]::WriteAllText((Join-Path $releaseRoot 'opensqcat.nvgt'), "#include `"opensqcat/opensqcat.nvgt`"`n", $utf8)
 
 	if ($documents.Count -eq 0) { throw 'Release must contain documentation.' }
-	foreach ($required in @('doc/README.md', 'doc/api/README.md', 'doc/tutorials/README.md', 'doc/advanced/README.md') + $documents) {
+	foreach ($required in @(
+		'doc/README.md',
+		'doc/api/README.md',
+		'doc/tutorials/first-catalog.md',
+		'doc/tutorials/live-values.md',
+		'doc/tutorials/catalog-references.md',
+		'doc/advanced/format.md',
+		'doc/advanced/integration.md',
+		'doc/advanced/development.md'
+	) + $documents) {
 		$packagedPath = 'opensqcat/docs/' + $required.Substring(4)
 		if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot $packagedPath) -PathType Leaf)) {
 			throw "Release omits documentation: $required"

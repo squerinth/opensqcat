@@ -68,7 +68,35 @@ Write-Output 'PASS: package verifier test double'
 		}
 		$roots = @($entries | ForEach-Object { $_.Split('/')[0] } | Sort-Object -Unique)
 		if ($roots.Count -ne 4 -or @($roots | Where-Object { $_ -notin @('opensqcat', 'examples', 'opensqcat.nvgt', 'README.md') }).Count) { throw 'ZIP must contain exactly the four distribution entries.' }
-		foreach ($required in @('opensqcat/opensqcat.nvgt', 'opensqcat.nvgt', 'README.md', 'opensqcat/LICENSE', 'examples/messages.nvgt', 'opensqcat/docs/README.md', 'opensqcat/docs/api/README.md', 'opensqcat/docs/tutorials/README.md', 'opensqcat/docs/advanced/README.md')) {
+		foreach ($required in @(
+			'opensqcat/opensqcat.nvgt',
+			'opensqcat.nvgt',
+			'README.md',
+			'opensqcat/LICENSE',
+			'examples/README.md',
+			'examples/messages.nvgt',
+			'examples/getting-started/main.nvgt',
+			'examples/getting-started/locales/en.sqcat',
+			'examples/quick-start/main.nvgt',
+			'examples/quick-start/locales/en.sqcat',
+			'examples/expressive-messages/main.nvgt',
+			'examples/expressive-messages/locales/en.sqcat',
+			'examples/per-call-fields/main.nvgt',
+			'examples/per-call-fields/locales/en.sqcat',
+			'examples/live-values/main.nvgt',
+			'examples/live-values/locales/en.sqcat',
+			'examples/catalog-references/main.nvgt',
+			'examples/catalog-references/locales/en.sqcat',
+			'examples/catalog-references/locales/common.sqcat',
+			'opensqcat/docs/README.md',
+			'opensqcat/docs/api/README.md',
+			'opensqcat/docs/tutorials/first-catalog.md',
+			'opensqcat/docs/tutorials/live-values.md',
+			'opensqcat/docs/tutorials/catalog-references.md',
+			'opensqcat/docs/advanced/format.md',
+			'opensqcat/docs/advanced/integration.md',
+			'opensqcat/docs/advanced/development.md'
+		)) {
 			if ($required -notin $entries) { throw "Release omits root content: $required" }
 		}
 	} finally { $zip.Dispose() }
@@ -123,13 +151,13 @@ Write-Output 'PASS: package verifier test double'
 	Write-Output 'PASS: package verification is mandatory and failure preserves the previous release'
 
 	# Default mode must include local documentation changes without requiring a commit.
-	$workingDocument = Join-Path $probe 'doc/advanced/README.md'
+	$workingDocument = Join-Path $probe 'doc/advanced/integration.md'
 	[IO.File]::AppendAllText($workingDocument, "`nWorking-tree release fixture.`n", $utf8)
 	$null = & powershell -NoProfile -ExecutionPolicy Bypass -File $tool @retentionArguments -SkipGlobalInstallationCheck -NvgtPath $NvgtPath -BuildDirectory $buildDirectory
 	if ($LASTEXITCODE -ne 0) { throw 'Default release failed in a fresh PowerShell process.' }
 	$zip = [IO.Compression.ZipFile]::OpenRead($archive)
 	try {
-		$entry = $zip.GetEntry('opensqcat/docs/advanced/README.md')
+		$entry = $zip.GetEntry('opensqcat/docs/advanced/integration.md')
 		$reader = [IO.StreamReader]::new($entry.Open())
 		try { $workingText = $reader.ReadToEnd() } finally { $reader.Dispose() }
 		if (-not $workingText.Contains('Working-tree release fixture.')) { throw 'Default release omitted local changes.' }

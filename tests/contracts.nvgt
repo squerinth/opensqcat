@@ -64,7 +64,7 @@ class mutating_provider : opensqcat::field_provider {
 			return false;
 		}
 		target.load_text("root=next\nhint=new");
-		target.set_variables({{"stable", "new general"}});
+		target.set_variable("stable", "new general");
 		target.set_provider(null);
 		@result = var("changed");
 		return true;
@@ -170,6 +170,8 @@ void test_catalog() {
 void test_catalog_snapshot_isolation() {
 	opensqcat::catalog original;
 	check(original.load_text("hello=original\nother=retained", "original origin"), "prepare snapshot isolation");
+	string output = "stale";
+	check(!original.render("hello", null, output) && output == "", "internal rendering rejects a null evaluation state");
 	opensqcat::catalog@ snapshot = original.snapshot();
 	opensqcat::translator live(original);
 	opensqcat::translator captured(snapshot);
@@ -590,6 +592,7 @@ void test_sources() {
 	messages.set_provider(mutating);
 	check(messages.get("root") == "changed old old general changed" && mutating.calls == 1,
 		"catalog, general fields, provider and resolved values stay stable across callbacks");
+	check(messages.format("{stable}") == "new general", "next operation observes copy-on-write general fields");
 	check(messages.get("root") == "next", "callback installation applies to next operation");
 }
 

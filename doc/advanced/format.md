@@ -3,8 +3,8 @@
 SQCat is an open, versioned text-localization format using `.sqcat` files.
 Its format version is independent of any implementation's release number.
 OpenSQCat implements SQCat 1 for NVGT and AngelScript. The rules below define the
-file format and expression language; implementation-specific API and resource
-limits are linked separately.
+file format and expression language; OpenSQCat's implementation limits are
+summarized at the end.
 
 ## Contents
 
@@ -22,7 +22,7 @@ limits are linked separately.
 A catalog is a case-sensitive map of message keys to text templates. Its contents
 are interpreted independently of its file name or directory. OpenSQCat's
 `translator.load(path)` uses the file name to choose a catalog registration name
-when the caller omits an explicit name; see [catalog loading](../api/opensqcat/Classes/translator/Methods/load.md).
+when the caller omits an explicit name; the final `.sqcat` suffix is removed.
 
 ## File structure
 
@@ -213,8 +213,7 @@ registration becomes the default only if no default was explicitly installed
 earlier. A non-null `translator(catalog@)` argument, `set_catalog(catalog@)`,
 `set_default_catalog(name)` or successful `load_text` with an empty
 `catalog_name` explicitly installs or replaces the default. Caller APIs select
-roots with `get_from(catalog_name, key)`, keeping keys literal. See
-[catalog management](../api/opensqcat/Classes/translator/Methods/set_catalog.md).
+roots with `get_from(catalog_name, key)`, keeping keys literal.
 
 ## Expressions
 
@@ -297,7 +296,10 @@ literals that overflow or underflow to zero are rejected. Decimal conversion use
 NVGT's `parse_double`; its rounding can differ from AngelScript source literals,
 including near 64-bit boundaries. Real values are approximate; use integer
 literals or typed integer fields for exact counts and identifiers. Plain numeric
-dictionary entries also undergo double conversion; see [field values](../api/concepts/field-values.md).
+and boolean dictionary entries use NVGT's double-precision conversion;
+booleans become 0 or 1 and large integers can lose precision. Typed field
+setters or `var` entries in per-call dictionaries preserve boolean and 64-bit
+integer categories.
 
 Integers format as decimal digits; real numbers use NVGT's double-to-string
 conversion. Neither applies locale-specific currency or numeric formatting.
@@ -330,4 +332,11 @@ The name `join` remains usable as a field when not followed by `(`. There are no
 arbitrary function calls, property access, assignments, arithmetic,
 concatenation operators, loops, file operations or format specifiers in expressions.
 Compose output by placing literal text, fields and references next to each other.
-Evaluation limits are documented in [diagnostics and limits](../api/concepts/diagnostics.md).
+
+OpenSQCat limits catalog input to 16 MiB, one template source to 1 MiB and
+parsed nodes per template to 32,768. Expression nesting is limited to 64 depth
+units and active references to 32 messages including the root. Evaluation is
+limited to 65,536 steps and 1 MiB of cumulative generated text per operation;
+intermediate reference and `join` results count toward that text limit. A shared
+`evaluation_budget` can accumulate steps and generated text across operations;
+depth and active-reference limits stay per operation.

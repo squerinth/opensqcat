@@ -1,0 +1,24 @@
+#include "../../src/opensqcat.nvgt"
+
+string player_name = "Sam";
+
+bool resolve_player(const string&in name, var@&out result) {
+	if (name != "playername") {
+		return false;
+	}
+	@result = var(player_name);
+	return true;
+}
+
+void main() {
+	opensqcat::translator messages;
+	if (!messages.load("locales/en.sqcat")) {
+		alert("OpenSQCat", messages.error.message);
+		return;
+	}
+	messages.set_resolver(resolve_player);
+
+	alert("Live values", messages.get("status"));
+	player_name = "Alex";
+	alert("Live values", messages.get("status"));
+}

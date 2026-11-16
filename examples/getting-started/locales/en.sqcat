@@ -1,0 +1,3 @@
+!sqcat_format_version 1
+
+welcome = Hello, {name}.

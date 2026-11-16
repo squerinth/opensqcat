@@ -1,0 +1,19 @@
+#include "../../src/opensqcat.nvgt"
+
+void main() {
+	opensqcat::translator messages;
+	if (!messages.load("locales/en.sqcat")
+		|| !messages.load("locales/common.sqcat")) {
+		alert("OpenSQCat", messages.error.message);
+		return;
+	}
+	if (!messages.set_variable("playername", "Alex")) {
+		alert("OpenSQCat", messages.error.message);
+		return;
+	}
+
+	alert("Welcome", messages.get("welcome"));
+	alert("Local help", messages.get("local_help"));
+	alert("Shared help", messages.get("shared_help"));
+	alert("Shared controls", messages.get_from("common", "controls"));
+}

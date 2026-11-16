@@ -1,79 +1,96 @@
-# Your first catalog
+# Per-call fields and missing-message handling
 
-This tutorial builds a small console program that loads a catalog, supplies
-shared values and checks for a missing message. It assumes NVGT is installed.
+This tutorial shows how to store a value on a translator, provide values for
+one message request, and handle a missing message. It includes its own catalog
+and program.
 
-## 1. Install the library
+Create this project beside the complete `opensqcat/` folder from the release:
 
-Copy the release ZIP's entire `opensqcat/` folder into your project, including
-its `LICENSE` and `docs/`. It contains the `opensqcat.nvgt` entry point and an
-inner `opensqcat/` implementation folder. Create a `locales/` directory beside
-the outer library folder.
+```tree
+first-catalog/
+    first_catalog.nvgt
+    opensqcat/
+    locales/
+        en.sqcat
+```
 
-## 2. Write the catalog
+## Catalog
 
-Save this UTF-8 text as `locales/en.sqcat`:
+Save this UTF-8 file as `locales/en.sqcat`:
 
 ```properties
 !sqcat_format_version 1
 
 welcome = Hello, {playername}.
-balance = You have {money} coins.
+balance = {playername}, you have {money} coins.
 ```
 
-Each entry has a key and a template. The field inside braces is filled from
-application data when the message is requested.
+Each line maps a message key to a template. `{playername}` and `{money}` are
+fields whose values come from the program when it requests a message.
 
-## 3. Write the program
+## Program
 
-Save this as `first_catalog.nvgt` beside `opensqcat/` and `locales/`:
+Save this as `first_catalog.nvgt`:
 
 ```nvgt
-#pragma console
 #include "opensqcat/opensqcat.nvgt"
 
 void main() {
 	opensqcat::translator messages;
 	if (!messages.load("locales/en.sqcat")) {
-		println(messages.error.message);
-		exit(1);
+		alert("OpenSQCat", messages.error.message);
+		return;
 	}
 	if (!messages.set_variable("playername", "Alex")) {
-		println(messages.error.message);
-		exit(1);
+		alert("OpenSQCat", messages.error.message);
+		return;
 	}
-	println(messages.get("welcome"));
-	println(messages.get("balance", {{"money", 3}}));
 
-	string text;
-	if (!messages.try_get("missing", text)) {
-		println("Missing message: " + messages.error.key);
+	alert("Welcome", messages.get("welcome"));
+	alert("Balance", messages.get("balance", {{"money", 3}, {"playername", "Sam"}}));
+	alert("Welcome", messages.get("welcome"));
+
+	string missing;
+	if (messages.try_get("missing", missing)) {
+		alert("Missing message", missing);
+	} else {
+		alert("Missing message", "Missing message: " + messages.error.key);
 	}
 }
 ```
 
-The shared player name is available to each call. The `money` dictionary belongs
-only to the `balance` call. `try_get` lets the application handle a failure
-explicitly instead of treating the returned key as translated text.
+`set_variable` stores `playername = Alex` on this translator, so ordinary
+requests can use it. The second argument to `get` is a dictionary for that
+request only. Its outer braces enclose field/value pairs, each written as
+`{"field", value}`. In
+`{{"money", 3}, {"playername", "Sam"}}`, the message receives `money = 3` and
+`playername = Sam`. Per-call values take priority over the translator's stored
+values, so that one `balance` request says “Sam”; the following `welcome`
+request still says “Alex”.
 
-## 4. Run it
+`try_get` lets the program distinguish missing messages from successful text.
+It writes the formatted message to its second argument and returns `true` on
+success. If the key is missing or formatting fails, it returns `false`, clears
+the output and sets `messages.error`. Here the program uses `messages.error.key`
+to report the missing key. If you add a `missing = ...` entry to the catalog,
+the `try_get` call succeeds and the dialog shows that message instead.
 
-Run the program with your NVGT executable:
+## Run it
+
+On Windows, select `first_catalog.nvgt` in File Explorer and press Enter. You
+can also open a command prompt in `first-catalog/` and run:
 
 ```powershell
-C:/nvgt/nvgt.exe -w 2 first_catalog.nvgt
+nvgt.exe first_catalog.nvgt
 ```
 
-Expected output:
+If `nvgt.exe` is not on your `PATH`, use its full path. The message texts are:
 
 ```text
 Hello, Alex.
-You have 3 coins.
+Sam, you have 3 coins.
+Hello, Alex.
 Missing message: missing
 ```
 
-Change the player name or coin count and run it again. Then add a `missing`
-entry to the catalog: the final error line will disappear.
-
-Continue with [live application values](live-values.md). For the exact retrieval
-contract, see [message retrieval](../api/opensqcat/Classes/translator/Methods/get.md).
+The tutorial is complete as written; a copy of the program and catalog is also included under `examples/per-call-fields/`.
