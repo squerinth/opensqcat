@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Packages identify their release channel and source revision in the README.
+- Restore isolation for catalog and translator copies and for evaluations that
+  remain active while a provider copies and mutates those objects.
+- Reject calls with an exhausted evaluation budget before parsing inline text.
 
 ## 0.1.0
 

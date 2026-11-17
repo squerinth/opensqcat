@@ -62,11 +62,10 @@ namespace opensqcat {
 			evaluation() {
 				@temporary = dictionary();
 			}
+			evaluation(const evaluation&inout) delete;
+			evaluation& opAssign(const evaluation&inout) delete;
 			void set_budget(evaluation_budget@ source) {
 				@budget = source is null ? evaluation_budget() : source;
-			}
-			bool budget_exhausted() const {
-				return budget.exhausted;
 			}
 			void set_setup_error(const string&in code, const string&in reason) {
 				if (error.code.length() == 0) {
@@ -410,6 +409,22 @@ namespace opensqcat {
 			general_fields.retain();
 			default_installed = messages !is null;
 		}
+		translator(const translator&inout source) {
+			opAssign(source);
+		}
+		translator& opAssign(const translator&inout source) {
+			if (cast<const translator@>(this) !is @source) {
+				@messages = source.messages;
+				named_catalogs = source.named_catalogs;
+				catalog_order = source.catalog_order;
+				default_catalog_name = source.default_catalog_name;
+				default_installed = source.default_installed;
+				replace_general_fields(source.general_fields);
+				@provider = source.provider;
+				@last_diagnostic = source.last_diagnostic.copy();
+			}
+			return this;
+		}
 		~translator() {
 			if (general_fields !is null) {
 				general_fields.release();
@@ -672,13 +687,18 @@ namespace opensqcat {
 			catalog@ selected = selected_catalog(catalog_name);
 			return selected !is null && selected.lookup(key, text);
 		}
+		private bool reject_exhausted_budget(evaluation_budget@ budget) {
+			if (budget is null || !budget.exhausted) {
+				return false;
+			}
+			@last_diagnostic = diagnostic();
+			last_diagnostic.code = "limit";
+			last_diagnostic.message = "evaluation budget is exhausted";
+			return true;
+		}
 		private detail::evaluation@ prepare(dictionary@ arguments, evaluation_budget@ budget) {
 			detail::evaluation@ state = detail::evaluation();
 			state.set_budget(budget);
-			if (state.budget_exhausted()) {
-				state.set_setup_error("limit", "evaluation budget is exhausted");
-				return state;
-			}
 			state.set_default_catalog_name(default_catalog_name);
 			if (default_catalog_name.length() == 0) {
 				state.set_default_catalog(messages.snapshot());
@@ -704,6 +724,9 @@ namespace opensqcat {
 		bool try_get_from(const string&in catalog_name, const string&in key,
 			string&out text, dictionary@ arguments = null, evaluation_budget@ budget = null) {
 			text = "";
+			if (reject_exhausted_budget(budget)) {
+				return false;
+			}
 			detail::evaluation@ state = prepare(arguments, budget);
 			bool valid = !state.failed() && state.render_key(key, text, null, 1, catalog_name);
 			@last_diagnostic = state.get_diagnostic();
@@ -725,6 +748,9 @@ namespace opensqcat {
 		bool try_format_from(const string&in catalog_name, const string&in source,
 			string&out text, dictionary@ arguments = null, evaluation_budget@ budget = null) {
 			text = "";
+			if (reject_exhausted_budget(budget)) {
+				return false;
+			}
 			detail::parser parser(source);
 			detail::program@ compiled = parser.compile();
 			if (compiled is null) {
