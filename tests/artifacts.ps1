@@ -68,6 +68,65 @@ try {
 	}
 	if ($toolchainTestState.downloads -ne 2 -or $env:TEMP -cne $previousTemp -or $env:TMP -cne $previousTmp) { throw 'Cache invalidation or environment restoration failed.' }
 	Write-Output "PASS: latest lookup, warm cache reuse ($afterBytes bytes before and after), invalidation and failed-download cleanup"
+
+	& {
+		# Use a disposable extractor shim and a real compiler to verify that
+		# cold setup extracts and probes the installation at its final path.
+		$cold = Join-Path $probe 'cold-toolchain'
+		$destination = Join-Path $cold 'current'
+		$fakeInstaller = Join-Path $probe 'installer-fixture'
+		$shim = Join-Path $probe 'extractor-fixture.ps1'
+		[IO.File]::WriteAllText($fakeInstaller, 'verified installer fixture')
+		$toolchainTestState.digest = (Get-FileHash -LiteralPath $fakeInstaller).Hash.ToLowerInvariant()
+		$toolchainTestState.extractFailure = $true
+		[IO.File]::WriteAllText($shim, @'
+$output = $args[([Array]::IndexOf($args, '--output-dir') + 1)]
+if ($output -cne $destination) { throw 'Cold extraction must use the final compiler path.' }
+$appRoot = Join-Path $output 'app'
+New-Item -ItemType Directory -Force -Path (Join-Path $appRoot 'include') | Out-Null
+if ($toolchainTestState.extractFailure) {
+	$global:LASTEXITCODE = 1
+	return
+}
+Copy-Item -LiteralPath $NvgtPath -Destination (Join-Path $appRoot 'nvgt.exe')
+Copy-Item -LiteralPath (Join-Path (Split-Path $NvgtPath -Parent) 'lib') -Destination $appRoot -Recurse
+$global:LASTEXITCODE = 0
+'@)
+		New-Item -ItemType Directory -Path $cold | Out-Null
+		[IO.File]::WriteAllText((Join-Path $cold 'innoextract.zip'), 'extractor fixture')
+		function Invoke-WebRequest {
+			param($Uri, $Headers, $OutFile, [switch]$UseBasicParsing)
+			Copy-Item -LiteralPath $fakeInstaller -Destination $OutFile
+		}
+		function Get-FileHash {
+			param($LiteralPath, $Algorithm)
+			if ($LiteralPath -ceq (Join-Path $cold 'innoextract.zip')) {
+				return @{Hash = '79b69b9b1fcd98f42ccd4b245efdf6a03bcfb674ba6af482f5a46891c9ed4d14'}
+			}
+			Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath $LiteralPath -Algorithm $Algorithm
+		}
+		function Expand-Archive {
+			param($LiteralPath, $DestinationPath)
+		}
+		function Join-Path {
+			param($Path, $ChildPath)
+			if ($ChildPath -ceq 'innoextract.exe') { return $shim }
+			Microsoft.PowerShell.Management\Join-Path -Path $Path -ChildPath $ChildPath
+		}
+		$failed = $false
+		try { $null = & (Join-Path $root 'tools/get-nvgt.ps1') -BuildDirectory $cold } catch {
+			if ($_.Exception.Message -cne 'NVGT extraction failed.') { throw }
+			$failed = $true
+		}
+		if (-not $failed -or @(Get-ChildItem -LiteralPath $cold -Force).Count -ne 1) { throw 'Failed extraction retained cache artifacts.' }
+		$toolchainTestState.extractFailure = $false
+		$compiler = & (Join-Path $root 'tools/get-nvgt.ps1') -BuildDirectory $cold
+		if ($compiler -cne (Join-Path $destination 'app/nvgt.exe') -or @(Get-ChildItem -LiteralPath $cold -Force).Count -ne 2) { throw 'Cold setup returned an unexpected path or retained artifacts.' }
+		if ((Get-Content -LiteralPath (Join-Path $destination 'cache.json') -Raw | ConvertFrom-Json).installer_sha256 -cne $toolchainTestState.digest) {
+			throw 'Cold setup did not record the verified installer.'
+		}
+		Write-Output 'PASS: cold setup probes NVGT in place and removes incomplete extractions'
+	}
 } finally {
 	Remove-TemporaryDirectory $probe (Join-Path $root 'build')
 }
