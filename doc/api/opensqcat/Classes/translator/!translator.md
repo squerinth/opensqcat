@@ -15,6 +15,13 @@ default. Catalog names supplied through the translator are passed through
 without case normalization; names inferred by `load` preserve filename spelling
 apart from removal of the final `.sqcat` suffix.
 
+Copy construction and value assignment copy the general fields, catalog
+registrations, default selection, provider handle and diagnostic. Each
+translator can change its own configuration independently. Both translators
+retain the same handles to catalogs and to the provider that were installed
+at the time of the copy. Changes to those shared objects are visible to both
+translators on subsequent calls.
+
 ## Properties
 - [default_catalog](Properties/default_catalog.md)
 - [error](Properties/error.md)

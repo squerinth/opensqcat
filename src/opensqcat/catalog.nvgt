@@ -191,6 +191,16 @@ namespace opensqcat {
 				revision.retain();
 			}
 		}
+		catalog(const catalog&inout source) {
+			opAssign(source);
+		}
+		catalog& opAssign(const catalog&inout source) {
+			if (cast<const catalog@>(this) !is @source) {
+				replace_revision(source.revision);
+				@last_diagnostic = source.last_diagnostic.copy();
+			}
+			return this;
+		}
 		~catalog() {
 			if (revision !is null) {
 				revision.release();

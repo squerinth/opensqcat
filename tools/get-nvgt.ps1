@@ -15,6 +15,7 @@ $mutex = [Threading.Mutex]::new($false, "Local\OpenSQCat-NVGT-$cacheKey")
 $locked = $false
 $runRoot = Join-Path $toolRoot ('setup-' + [guid]::NewGuid().ToString('N'))
 $installer = $null
+$refreshingCache = $false
 $previousTemp = $env:TEMP
 $previousTmp = $env:TMP
 try {
@@ -60,14 +61,15 @@ try {
 		}
 		$extractorRoot = Join-Path $runRoot 'extractor'
 		Expand-Archive -LiteralPath $extractorArchive -DestinationPath $extractorRoot
-		$selectedRoot = Join-Path $runRoot 'cache'
+		# Extract to the final location. Windows can deny a directory move
+		# after an executable has been launched from the extracted tree.
+		Remove-TemporaryDirectory $cacheRoot $toolRoot
+		$refreshingCache = $true
 		# Verification runs scripts; application-packaging stubs are unnecessary.
-		& (Join-Path $extractorRoot 'innoextract.exe') --silent --include 'app\nvgt.exe' --include 'app\lib' --include 'app\include' --output-dir $selectedRoot $installer
+		& (Join-Path $extractorRoot 'innoextract.exe') --silent --include 'app\nvgt.exe' --include 'app\lib' --include 'app\include' --output-dir $cacheRoot $installer
 		if ($LASTEXITCODE -ne 0) { throw 'NVGT extraction failed.' }
-	} else {
-		$selectedRoot = $cacheRoot
 	}
-	$nvgtPath = Join-Path $selectedRoot 'app/nvgt.exe'
+	$nvgtPath = Join-Path $cacheRoot 'app/nvgt.exe'
 	$probe = Join-Path $runRoot 'version.nvgt'
 	[IO.File]::WriteAllText($probe, "#pragma console`nvoid main() { println(NVGT_VERSION); println(NVGT_VERSION_COMMIT_HASH); }`n", [Text.UTF8Encoding]::new($false))
 	$identity = @(& $nvgtPath -w 2 $probe)
@@ -76,12 +78,8 @@ try {
 	}
 	if (-not $reuse) {
 		$manifest = @{schema = 1; installer_sha256 = $digest}
-		[IO.File]::WriteAllText((Join-Path $selectedRoot 'cache.json'), ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-		Remove-TemporaryDirectory $cacheRoot $toolRoot
-		$parentPrefix = $toolRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-		if (-not ([IO.Path]::GetFullPath($selectedRoot).StartsWith($parentPrefix, [StringComparison]::OrdinalIgnoreCase)) -or -not ([IO.Path]::GetFullPath($cacheRoot).StartsWith($parentPrefix, [StringComparison]::OrdinalIgnoreCase))) { throw 'Cache move is outside the tool directory.' }
-		Move-Item -LiteralPath $selectedRoot -Destination $cacheRoot
-		$nvgtPath = Join-Path $cacheRoot 'app/nvgt.exe'
+		[IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+		$refreshingCache = $false
 	}
 	Write-Host "Verified NVGT $($identity[0]) commit $($identity[1])"
 	# The only success-stream output is the compiler path.
@@ -91,7 +89,11 @@ try {
 	$env:TMP = $previousTmp
 	try {
 		if ($null -ne $installer -and (Test-Path -LiteralPath $installer)) { Remove-Item -LiteralPath $installer -Force }
-		Remove-TemporaryDirectory $runRoot $toolRoot
+		try {
+			if ($refreshingCache) { Remove-TemporaryDirectory $cacheRoot $toolRoot }
+		} finally {
+			Remove-TemporaryDirectory $runRoot $toolRoot
+		}
 	} finally {
 		if ($locked) { $mutex.ReleaseMutex() }
 		$mutex.Dispose()

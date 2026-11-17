@@ -124,6 +124,34 @@ class default_switcher : opensqcat::field_provider {
 	}
 }
 
+class copying_provider : opensqcat::field_provider {
+	opensqcat::catalog@ source;
+	opensqcat::translator@ target;
+	string nested;
+
+	copying_provider(opensqcat::catalog@ source, opensqcat::translator@ target) {
+		@this.source = source;
+		@this.target = target;
+	}
+	bool resolve(const string&in name, var@&out result) override {
+		if (name != "trigger") {
+			return false;
+		}
+		{
+			opensqcat::catalog discarded;
+			discarded = source;
+		}
+		source.set("hint", "new text");
+		opensqcat::translator copy;
+		copy = target;
+		copy.set_variable("field", "copy field");
+		target.set_variable("field", "new field");
+		nested = target.get("state");
+		@result = var("done");
+		return true;
+	}
+}
+
 void test_catalog() {
 	opensqcat::catalog catalog;
 	check(catalog.load_text("\xEF\xBB\xBF# UTF-8\r\n Name = Uno \r\nname = Dos\r\nempty=\r\nformula=a=b # literal\r\n", "sample"),
@@ -185,6 +213,87 @@ void test_catalog_snapshot_isolation() {
 	check(original.set("hello", "restored"), "restore source before snapshot clear");
 	snapshot.clear();
 	check(live.get("hello") == "restored" && !captured.has("hello"), "snapshot clear preserves source messages");
+}
+
+opensqcat::catalog return_catalog(opensqcat::catalog@ source) {
+	return source;
+}
+
+void test_catalog_value_copy() {
+	opensqcat::catalog source;
+	check(source.load_text("hint=old", "original"), "prepare catalog value copy");
+	check(!source.set("bad", "{") && source.error.code == "syntax", "prepare catalog copy diagnostic");
+	opensqcat::catalog assigned;
+	assigned.set("unrelated", "discard");
+	assigned = source;
+	assigned = assigned;
+	check(!assigned.contains("unrelated") && assigned.loaded_path == "original"
+		&& assigned.error.code == "syntax", "catalog assignment replaces old state and preserves provenance and diagnostic");
+	check(assigned.set("hint", "assigned") && assigned.loaded_path == "" && assigned.error.code == "",
+		"editing assigned catalog updates its own provenance and diagnostic");
+	string text;
+	check(source.lookup("hint", text) && text == "old" && source.loaded_path == "original"
+		&& source.error.code == "syntax", "assigned catalog edit preserves source state");
+	opensqcat::catalog constructed = return_catalog(source);
+	check(constructed.remove("hint") && source.contains("hint"), "catalog returned by value can remove its own entry");
+	array<opensqcat::catalog> copies;
+	copies.insert_last(source);
+	opensqcat::catalog@ alias = source;
+	check(alias.set("hint", "live") && source.lookup("hint", text) && text == "live"
+		&& copies[0].lookup("hint", text) && text == "old", "catalog array copies stay independent of live handles");
+}
+
+void test_translator_value_copy() {
+	opensqcat::catalog shared;
+	shared.set("hint", "old");
+	opensqcat::translator source;
+	check(source.set_catalog("first", shared) && source.set_catalog("second", shared)
+		&& source.set_variable("field", "old"), "prepare translator value copy");
+	source.set_resolver(fixed_resolver);
+	check(!source.set_default_catalog("missing") && source.error.code == "catalog", "prepare translator copy diagnostic");
+	opensqcat::translator assigned;
+	assigned.set_catalog("unrelated", null);
+	assigned = source;
+	assigned = assigned;
+	check(!assigned.has_catalog("unrelated") && assigned.default_catalog == "first"
+		&& assigned.error.code == "catalog", "translator assignment replaces old registry, selection and diagnostic");
+	expect(assigned, "{player}", "callback");
+	check(assigned.remove_catalog("first") && assigned.default_catalog == "second"
+		&& source.default_catalog == "first" && source.has_catalog("first"), "translator registry and order stay independent");
+	check(assigned.set_variable("field", "assigned"), "edit assigned general field");
+	expect(source, "{field}", "old");
+	expect(assigned, "{field}", "assigned");
+	opensqcat::translator constructed = source;
+	check(constructed.remove_variable("field"), "remove field from copy constructed translator");
+	expect(source, "{field}", "old");
+	shared.set("hint", "live");
+	check(source.get("hint") == "live" && assigned.get("hint") == "live"
+		&& constructed.get("hint") == "live", "translator copies retain live registered handles");
+}
+
+void test_copy_during_evaluation() {
+	for (uint i = 0; i < 2; i++) {
+		opensqcat::catalog source;
+		source.set("hint", "old text");
+		opensqcat::translator messages;
+		if (i == 0) {
+			messages.set_catalog(source);
+			source.set("state", "{field} {$hint}");
+			source.set("root", "{trigger} {field} {$hint}");
+		} else {
+			messages.load_text("state={field} {$common/hint}\nroot={trigger} {field} {$common/hint}");
+			messages.set_catalog("common", source);
+		}
+		messages.set_variable("field", "old field");
+		copying_provider provider(source, messages);
+		messages.set_provider(provider);
+		string text;
+		check(messages.try_get("root", text) && text == "done old field old text",
+			"active evaluation retains fields and catalog revisions after copies in provider, got [" + text + "]");
+		check(provider.nested == "new field new text" && messages.get("state") == "new field new text",
+			"nested and subsequent evaluations see provider mutations");
+		messages.set_provider(null);
+	}
 }
 
 void test_declarations() {
@@ -696,6 +805,10 @@ void test_shared_budget() {
 		"second individually valid operation exhausts aggregate byte budget");
 	check(budget.bytes == 600000, "failed byte reservation does not partially consume bytes");
 	check(!messages.try_format("", text, null, budget) && messages.error.code == "limit", "exhausted budget stays exhausted even for empty text");
+	text = "stale";
+	check(!messages.try_format_from("unknown", "{", text, null, budget) && text == ""
+		&& messages.error.code == "limit" && messages.error.column == 0,
+		"already exhausted budget takes precedence over parsing and catalog selection");
 	expect(messages, "fresh ordinary operation", "fresh ordinary operation");
 	opensqcat::evaluation_budget work;
 	check(work.consume(65535), "caller may account for surrounding work");
@@ -782,6 +895,9 @@ void main() {
 	println("NVGT " + NVGT_VERSION + " commit " + NVGT_VERSION_COMMIT_HASH);
 	test_catalog();
 	test_catalog_snapshot_isolation();
+	test_catalog_value_copy();
+	test_translator_value_copy();
+	test_copy_during_evaluation();
 	test_declarations();
 	test_expressions();
 	test_join();

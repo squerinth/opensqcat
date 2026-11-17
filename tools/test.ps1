@@ -155,11 +155,13 @@ try {
 		throw "OpenSQCat contracts failed (exit $LASTEXITCODE). Rerun with -KeepArtifacts to retain diagnostics."
 	}
 	# These programs must not compile: snapshots cannot expose parsed records,
-	# evaluator state is private, and an evaluator subclass cannot intercept rendering.
+	# evaluator state is private and cannot be copied or subclassed.
 	$isolationProbes = @(
 		'void main() { opensqcat::catalog source; dictionary@ exposed = source.snapshot(); }',
 		'void main() { opensqcat::catalog source; opensqcat::catalog@ captured = source.snapshot(); dictionary exposed = captured.entries; }',
 		'void main() { opensqcat::detail::evaluation state; state.error.code = "forged"; }',
+		'void main() { opensqcat::detail::evaluation state; opensqcat::detail::evaluation copy = state; }',
+		'void main() { opensqcat::detail::evaluation state; opensqcat::detail::evaluation copy; copy = state; }',
 		'class interceptor : opensqcat::detail::evaluation {} void main() {}'
 	)
 	for ($probeIndex = 0; $probeIndex -lt $isolationProbes.Count; $probeIndex++) {
@@ -171,7 +173,7 @@ try {
 			throw "Catalog isolation probe $probeIndex was not rejected by the compiler. Rerun with -KeepArtifacts to retain diagnostics."
 		}
 	}
-	Write-Output 'PASS: mutable snapshot access, evaluator state and interception rejected'
+	Write-Output 'PASS: mutable snapshot access and evaluator state access, copying and interception rejected'
 	$exampleSource = Join-Path $packageRoot 'examples/messages.nvgt'
 	$exampleTest = Join-Path $packageRoot 'examples/messages-console-test.nvgt'
 	$exampleProgram = Convert-GuiProgramToConsoleTest ([IO.File]::ReadAllText($exampleSource))
