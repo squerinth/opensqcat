@@ -1,0 +1,6 @@
+!sqcat_format_version 1
+
+welcome = Welcome, {playername}!
+local_help = {playername}: {$hint}
+shared_help = {playername}: {$common/controls}
+hint = Press Enter to continue.

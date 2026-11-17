@@ -17,4 +17,7 @@ Initial release of OpenSQCat for NVGT.
 
 ## 0.1.1
 
-- Include the license and documentation in the installable library folder.
+- Included the license and documentation in the installable library folder.
+- Reorganized the documentation, clarified explanations, and corrected factual errors.
+- Improved performance.
+- Rewrote the repository README to give new users a clearer introduction to the library.

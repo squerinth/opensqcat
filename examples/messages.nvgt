@@ -1,4 +1,3 @@
-#pragma console
 #include "../src/opensqcat.nvgt"
 
 string player_name = "Sam";
@@ -14,23 +13,23 @@ bool resolve_player(const string&in name, var@&out result) {
 void main() {
 	opensqcat::translator messages;
 	if (!messages.load("locales/en.sqcat") || !messages.load("locales/common.sqcat")) {
-		println(messages.error.message);
+		alert("OpenSQCat", messages.error.message);
 		exit(1);
 	}
 	messages.set_resolver(resolve_player);
 	if (!messages.set_variable("logged_in", true)
 		|| !messages.set_variable("owner", false)
 		|| !messages.set_variable("admin", true)) {
-		println(messages.error.message);
+		alert("OpenSQCat", messages.error.message);
 		exit(1);
 	}
-	println(messages.get("welcome"));
-	println(messages.get("balance", {{"money", 25}}));
-	println(messages.get("access"));
-	println(messages.get("help"));
-	println(messages.get("summary"));
-	println(messages.get_from("common", "help"));
-	println(messages.format("{playername}: {$common/help}"));
+	alert("Welcome", messages.get("welcome"));
+	alert("Balance", messages.get("balance", {{"money", 25}}));
+	alert("Access", messages.get("access"));
+	alert("Help", messages.get("help"));
+	alert("Summary", messages.get("summary"));
+	alert("Shared help", messages.get_from("common", "help"));
+	alert("Inline help", messages.format("{playername}: {$common/help}"));
 	player_name = "Alex";
-	println(messages.get("welcome"));
+	alert("Welcome", messages.get("welcome"));
 }

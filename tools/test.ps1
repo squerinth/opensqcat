@@ -84,31 +84,67 @@ try {
 		}
 	}
 
-	function Test-DocumentationProgram([string]$DocumentPath, [string]$WorkingDirectory, [string]$Compiler, [switch]$GlobalInclude) {
+	function Convert-GuiProgramToConsoleTest([string]$Program) {
+		$displayPattern = [regex]::new('(?m)^(?<indent>[\t ]*)alert\("[^"\r\n]+",[\t ]*(?<value>[^;\r\n]+)\);[\t ]*\r?$')
+		$displayCalls = $displayPattern.Matches($Program)
+		if ($displayCalls.Count -eq 0) {
+			throw 'Expected at least one alert call in the GUI example.'
+		}
+		$Program = $displayPattern.Replace($Program, '${indent}println(${value});')
+		if ($Program -notmatch '(?m)^\s*#pragma console\s*$') {
+			$Program = "#pragma console`n" + $Program
+		}
+		return $Program
+	}
+
+	function Test-DocumentationProgram([string]$DocumentPath, [string]$WorkingDirectory, [string]$Compiler, [switch]$GlobalInclude, [int]$ExampleIndex = -1, [string[]]$CatalogNames = @()) {
 		$document = Get-Content -LiteralPath $DocumentPath -Raw -Encoding UTF8
 		$catalogs = [regex]::Matches($document, '(?s)```properties\r?\n(.*?)```')
 		$programs = @([regex]::Matches($document, '(?s)```nvgt\r?\n(.*?)```') | Where-Object { $_.Groups[1].Value -match 'void main\(' })
 		$outputs = [regex]::Matches($document, '(?s)```text\r?\n(.*?)```')
-		if ($catalogs.Count -ne 1 -or $programs.Count -ne 1 -or $outputs.Count -ne 1) {
-			throw "Expected one catalog, complete program and output in $DocumentPath"
+		if ($ExampleIndex -ge 0) {
+			if ($catalogs.Count -le $ExampleIndex -or $programs.Count -le $ExampleIndex -or $outputs.Count -le $ExampleIndex) {
+				throw "Example $ExampleIndex is incomplete in $DocumentPath"
+			}
+			$selectedCatalogIndexes = @($ExampleIndex)
+			$selectedProgramIndex = $ExampleIndex
+			$selectedOutputIndex = $ExampleIndex
+			if ($CatalogNames.Count -gt 1) { throw 'Named catalog files cannot be combined with an example index.' }
+			if ($CatalogNames.Count -eq 0) { $CatalogNames = @('en') }
+		} else {
+			if ($programs.Count -ne 1 -or $outputs.Count -ne 1) {
+				throw "Expected one complete program and output in $DocumentPath"
+			}
+			$selectedCatalogIndexes = @(0..($catalogs.Count - 1))
+			$selectedProgramIndex = 0
+			$selectedOutputIndex = 0
+			if ($CatalogNames.Count -eq 0) { $CatalogNames = @('en') }
+			if ($catalogs.Count -ne $CatalogNames.Count) {
+				throw "Expected $($CatalogNames.Count) named catalogs in $DocumentPath"
+			}
 		}
 		$locales = Join-Path $WorkingDirectory 'locales'
 		New-Item -ItemType Directory -Force -Path $locales | Out-Null
 		$utf8 = [Text.UTF8Encoding]::new($false)
-		[IO.File]::WriteAllText((Join-Path $locales 'en.sqcat'), $catalogs[0].Groups[1].Value, $utf8)
-		$program = $programs[0].Groups[1].Value
+		for ($catalogIndex = 0; $catalogIndex -lt $selectedCatalogIndexes.Count; $catalogIndex++) {
+			$sourceIndex = $selectedCatalogIndexes[$catalogIndex]
+			$catalogPath = Join-Path $locales ($CatalogNames[$catalogIndex] + '.sqcat')
+			[IO.File]::WriteAllText($catalogPath, $catalogs[$sourceIndex].Groups[1].Value, $utf8)
+		}
+		$program = $programs[$selectedProgramIndex].Groups[1].Value
 		if ($GlobalInclude) {
 			$program = $program.Replace('#include "opensqcat/opensqcat.nvgt"', '#include "opensqcat.nvgt"')
 		} else {
 			Copy-LibraryInstallation (Join-Path $WorkingDirectory 'opensqcat')
 		}
+		$program = Convert-GuiProgramToConsoleTest $program
 		$programPath = Join-Path $WorkingDirectory 'main.nvgt'
 		[IO.File]::WriteAllText($programPath, $program, $utf8)
 		$actualOutput = @(& $Compiler -w 2 $programPath)
 		if ($LASTEXITCODE -ne 0) { throw "Documentation program failed: $DocumentPath. Rerun with -KeepArtifacts to retain diagnostics." }
-		$expectedOutput = ($outputs[0].Groups[1].Value -replace '\r\n', "`n").TrimEnd("`n")
+		$expectedOutput = ($outputs[$selectedOutputIndex].Groups[1].Value -replace '\r\n', "`n").TrimEnd("`n")
 		if (($actualOutput -join "`n") -cne $expectedOutput) {
-			throw "Documentation program output differs from its documented result: $DocumentPath. Rerun with -KeepArtifacts to retain diagnostics."
+			throw "Documentation dialog content differs from its documented result: $DocumentPath. Rerun with -KeepArtifacts to retain diagnostics."
 		}
 		$actualOutput | Write-Output
 	}
@@ -119,10 +155,11 @@ try {
 		throw "OpenSQCat contracts failed (exit $LASTEXITCODE). Rerun with -KeepArtifacts to retain diagnostics."
 	}
 	# These programs must not compile: snapshots cannot expose parsed records,
-	# and an evaluator subclass must not intercept their rendering.
+	# evaluator state is private, and an evaluator subclass cannot intercept rendering.
 	$isolationProbes = @(
 		'void main() { opensqcat::catalog source; dictionary@ exposed = source.snapshot(); }',
 		'void main() { opensqcat::catalog source; opensqcat::catalog@ captured = source.snapshot(); dictionary exposed = captured.entries; }',
+		'void main() { opensqcat::detail::evaluation state; state.error.code = "forged"; }',
 		'class interceptor : opensqcat::detail::evaluation {} void main() {}'
 	)
 	for ($probeIndex = 0; $probeIndex -lt $isolationProbes.Count; $probeIndex++) {
@@ -134,23 +171,38 @@ try {
 			throw "Catalog isolation probe $probeIndex was not rejected by the compiler. Rerun with -KeepArtifacts to retain diagnostics."
 		}
 	}
-	Write-Output 'PASS: mutable snapshot access and evaluator interception rejected'
-	$exampleOutput = @(& $NvgtPath -w 2 (Join-Path $packageRoot 'examples/messages.nvgt'))
+	Write-Output 'PASS: mutable snapshot access, evaluator state and interception rejected'
+	$exampleSource = Join-Path $packageRoot 'examples/messages.nvgt'
+	$exampleTest = Join-Path $packageRoot 'examples/messages-console-test.nvgt'
+	$exampleProgram = Convert-GuiProgramToConsoleTest ([IO.File]::ReadAllText($exampleSource))
+	[IO.File]::WriteAllText($exampleTest, $exampleProgram, [Text.UTF8Encoding]::new($false))
+	$exampleOutput = @(& $NvgtPath -w 2 $exampleTest)
 	if ($LASTEXITCODE -ne 0) {
 		throw "OpenSQCat example failed (exit $LASTEXITCODE). Rerun with -KeepArtifacts to retain diagnostics."
 	}
-	$exampleOutput | Write-Output
-	$liveTutorial = Get-Content -LiteralPath (Join-Path $packageRoot "$documentationDirectory/tutorials/live-values.md") -Raw -Encoding UTF8
-	$liveExpected = [regex]::Match($liveTutorial, '(?s)```text\r?\n(.*?)```')
-	if (-not $liveExpected.Success -or ($exampleOutput -join "`n") -cne ($liveExpected.Groups[1].Value -replace '\r\n', "`n").TrimEnd("`n")) {
-		throw 'Console example output differs from the live-values tutorial.'
+	$expectedExampleOutput = @(
+		'Hello, Sam.',
+		'You have 25 coins.',
+		'You can edit',
+		'Sam: Use the arrow keys.',
+		'Sam, administrator',
+		'Press Enter to continue.',
+		'Sam: Press Enter to continue.',
+		'Hello, Alex.'
+	)
+	if (($exampleOutput -join "`n") -cne ($expectedExampleOutput -join "`n")) {
+		throw 'OpenSQCat example output differs from its expected message text.'
 	}
-	# Test the README's catalog and program together, without example fixtures.
+	$exampleOutput | Write-Output
+	# Test the README's catalog and program examples together.
 	$null = Get-SourceVersion $packageRoot
-	Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $packageRoot 'readme-project') $NvgtPath
+	Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'readme-quick-start') $NvgtPath -ExampleIndex 0
+	Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'readme-expressive-messages') $NvgtPath -ExampleIndex 1
 	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/tutorials/first-catalog.md") (Join-Path $packageRoot 'tutorial-project') $NvgtPath
+	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/tutorials/live-values.md") (Join-Path $packageRoot 'live-values-project') $NvgtPath
+	Test-DocumentationProgram (Join-Path $packageRoot "$documentationDirectory/tutorials/catalog-references.md") (Join-Path $packageRoot 'catalog-references-project') $NvgtPath -CatalogNames @('en', 'common')
 
-	Write-Output 'PASS: project installation; README and tutorial outputs'
+	Write-Output 'PASS: project installation; README and tutorial dialog contents'
 	if ($CheckGlobalInstallation) {
 		# Check conventional global includes from an unrelated project, without
 		# changing the caller's NVGT installation or include configuration.
@@ -167,7 +219,8 @@ try {
 		} else {
 			[IO.File]::WriteAllText($globalWrapper, "#include `"opensqcat/opensqcat.nvgt`"`n", [Text.UTF8Encoding]::new($false))
 		}
-		Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'global-project') (Join-Path $engineRoot 'nvgt.exe') -GlobalInclude
+		Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'global-readme-project') (Join-Path $engineRoot 'nvgt.exe') -GlobalInclude -ExampleIndex 0
+		Test-DocumentationProgram (Join-Path $packageRoot 'README.md') (Join-Path $runRoot 'global-readme-expressive-messages') (Join-Path $engineRoot 'nvgt.exe') -GlobalInclude -ExampleIndex 1
 		Write-Output 'PASS: global installation'
 	}
 	$documentationRoot = if ([string]::IsNullOrWhiteSpace($DistributionPath)) { $packageRoot } else { $inputRoot }

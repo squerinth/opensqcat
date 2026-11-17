@@ -1,18 +1,116 @@
 namespace opensqcat {
 	namespace detail {
+		final class field_revision {
+			private dictionary values;
+			private uint owners = 0;
+
+			void retain() {
+				owners++;
+			}
+			void release() {
+				if (owners > 0) {
+					owners--;
+				}
+			}
+			bool shared() const {
+				return owners > 1;
+			}
+			field_revision@ copy() const {
+				field_revision@ result = field_revision();
+				result.values = values;
+				return result;
+			}
+			void replace(dictionary@ source) {
+				values = source;
+			}
+			bool exists(const string&in name) const {
+				return values.exists(name);
+			}
+			bool get(const string&in name, value@&out item) const {
+				if (!values.get(name, @item) || item is null) {
+					@item = null;
+					return false;
+				}
+				return true;
+			}
+			bool set(const string&in name, value@ item) {
+				if (item is null) {
+					return false;
+				}
+				values.set(name, @item);
+				return true;
+			}
+			bool remove(const string&in name) {
+				return values.delete(name);
+			}
+		}
+
 		final class evaluation {
-			catalog@ messages;
-			dictionary catalogs;
-			string default_catalog_name;
-			dictionary@ temporary;
-			dictionary@ general;
-			field_provider@ provider;
-			diagnostic@ error = diagnostic();
+			private catalog@ messages;
+			private dictionary catalogs;
+			private string default_catalog_name;
+			private dictionary@ temporary;
+			private field_revision@ general;
+			private field_provider@ provider;
+			private diagnostic@ error = diagnostic();
 			private dictionary resolved;
 			private string[] include_stack;
 			private string[] include_catalogs;
 			private string active_catalog;
-			evaluation_budget@ budget = evaluation_budget();
+			private evaluation_budget@ budget = evaluation_budget();
+
+			evaluation() {
+				@temporary = dictionary();
+			}
+			void set_budget(evaluation_budget@ source) {
+				@budget = source is null ? evaluation_budget() : source;
+			}
+			bool budget_exhausted() const {
+				return budget.exhausted;
+			}
+			void set_setup_error(const string&in code, const string&in reason) {
+				if (error.code.length() == 0) {
+					error.code = code;
+					error.message = reason;
+				}
+			}
+			bool failed() const {
+				return error.code.length() > 0;
+			}
+			diagnostic@ get_diagnostic() const {
+				return error.copy();
+			}
+			void set_default_catalog_name(const string&in name) {
+				default_catalog_name = name;
+			}
+			void set_default_catalog(catalog@ source) {
+				@messages = source;
+			}
+			void add_catalog(const string&in name, catalog@ source) {
+				catalogs.set(name, @source);
+			}
+			void set_provider(field_provider@ source) {
+				@provider = source;
+			}
+			void capture_general(field_revision@ source) {
+				if (general !is null) {
+					general.release();
+				}
+				@general = source;
+				if (general !is null) {
+					general.retain();
+				}
+			}
+			bool copy_arguments(dictionary@ source, string&out reason) {
+				@temporary = dictionary();
+				return copy_fields(source, temporary, reason);
+			}
+
+			~evaluation() {
+				if (general !is null) {
+					general.release();
+				}
+			}
 
 			private bool fail(const string&in code, const string&in reason,
 				message@ owner, uint position = 1) {
@@ -51,7 +149,7 @@ namespace opensqcat {
 				if (resolved.get(name, @result)) {
 					return result;
 				}
-				if (temporary.get(name, @result) || general.get(name, @result)) {
+				if (temporary.get(name, @result) || (general !is null && general.get(name, @result))) {
 					resolved.set(name, @result);
 					return result;
 				}
@@ -122,6 +220,10 @@ namespace opensqcat {
 				return value(result);
 			}
 			private value@ combine(node@ expression, message@ owner, uint depth) {
+				if (expression.arguments.length() == 0) {
+					fail("syntax", "invalid compiled join expression", owner, expression.position);
+					return value();
+				}
 				value@ separator = evaluate(expression.arguments[0], owner, depth + 1);
 				if (error.code.length() > 0) {
 					return value();
@@ -157,6 +259,10 @@ namespace opensqcat {
 				return value(result);
 			}
 			private value@ evaluate(node@ expression, message@ owner, uint depth) {
+				if (expression is null) {
+					fail("syntax", "invalid compiled message expression", owner);
+					return value();
+				}
 				if (!spend(owner, expression.position)) {
 					return value();
 				}
@@ -165,6 +271,10 @@ namespace opensqcat {
 					return value();
 				}
 				if (expression.kind == literal_node) {
+					if (expression.scalar is null) {
+						fail("syntax", "invalid compiled literal", owner, expression.position);
+						return value();
+					}
 					return expression.scalar;
 				}
 				if (expression.kind == field_node) {
@@ -208,6 +318,9 @@ namespace opensqcat {
 			}
 			bool render_message(message@ owner, string&out result) {
 				result = "";
+				if (owner is null || owner.compiled is null) {
+					return fail("message", "message is unavailable", owner);
+				}
 				for (uint i = 0; i < owner.compiled.parts.length(); i++) {
 					node@ part = owner.compiled.parts[i];
 					value@ item = evaluate(part, owner, 0);
@@ -260,7 +373,7 @@ namespace opensqcat {
 					}
 					return false;
 				}
-				if (!selected.contains(key)) {
+				if (selected is null || !selected.contains(key)) {
 					fail("message", "message not found: " + key, referring, position);
 					if (referring is null) {
 						error.key = key;
@@ -287,13 +400,38 @@ namespace opensqcat {
 		private string[] catalog_order;
 		private string default_catalog_name;
 		private bool default_installed = false;
-		private dictionary general_fields;
+		private detail::field_revision@ general_fields;
 		private field_provider@ provider;
 		private diagnostic@ last_diagnostic = diagnostic();
 
 		translator(catalog@ messages = null) {
 			@this.messages = messages is null ? catalog() : messages;
+			@general_fields = detail::field_revision();
+			general_fields.retain();
 			default_installed = messages !is null;
+		}
+		~translator() {
+			if (general_fields !is null) {
+				general_fields.release();
+			}
+		}
+		private void replace_general_fields(detail::field_revision@ source) {
+			if (general_fields is source) {
+				return;
+			}
+			if (general_fields !is null) {
+				general_fields.release();
+			}
+			@general_fields = source;
+			if (general_fields !is null) {
+				general_fields.retain();
+			}
+		}
+		private void make_general_fields_writable() {
+			if (general_fields.shared()) {
+				detail::field_revision@ writable = general_fields.copy();
+				replace_general_fields(writable);
+			}
 		}
 		diagnostic@ get_error() const property {
 			return last_diagnostic.copy();
@@ -399,7 +537,9 @@ namespace opensqcat {
 				last_diagnostic.message = reason;
 				return false;
 			}
-			general_fields = staged;
+			detail::field_revision@ replacement = detail::field_revision();
+			replacement.replace(staged);
+			replace_general_fields(replacement);
 			@last_diagnostic = diagnostic();
 			return true;
 		}
@@ -411,7 +551,8 @@ namespace opensqcat {
 				last_diagnostic.message = "invalid field name or value: " + name;
 				return false;
 			}
-			general_fields.set(name, @item);
+			make_general_fields_writable();
+			general_fields.set(name, item);
 			@last_diagnostic = diagnostic();
 			return true;
 		}
@@ -440,12 +581,16 @@ namespace opensqcat {
 			return set_variable(name, var(number));
 		}
 		bool remove_variable(const string&in name) {
-			bool removed = general_fields.delete(name);
+			bool removed = general_fields.exists(name);
+			if (removed) {
+				make_general_fields_writable();
+				general_fields.remove(name);
+			}
 			@last_diagnostic = diagnostic();
 			return removed;
 		}
 		void clear_variables() {
-			general_fields.delete_all();
+			replace_general_fields(detail::field_revision());
 			@last_diagnostic = diagnostic();
 		}
 		private catalog@ selected_catalog(const string&in name) const {
@@ -529,29 +674,27 @@ namespace opensqcat {
 		}
 		private detail::evaluation@ prepare(dictionary@ arguments, evaluation_budget@ budget) {
 			detail::evaluation@ state = detail::evaluation();
-			@state.budget = budget is null ? evaluation_budget() : budget;
-			if (state.budget.exhausted) {
-				state.error.code = "limit";
-				state.error.message = "evaluation budget is exhausted";
+			state.set_budget(budget);
+			if (state.budget_exhausted()) {
+				state.set_setup_error("limit", "evaluation budget is exhausted");
 				return state;
 			}
-			@state.messages = messages.snapshot();
-			state.default_catalog_name = default_catalog_name;
-			string[]@ names = named_catalogs.get_keys();
-			for (uint i = 0; i < names.length(); i++) {
-				catalog@ selected;
-				named_catalogs.get(names[i], @selected);
-				catalog@ snapshot = selected.snapshot();
-				state.catalogs.set(names[i], @snapshot);
+			state.set_default_catalog_name(default_catalog_name);
+			if (default_catalog_name.length() == 0) {
+				state.set_default_catalog(messages.snapshot());
 			}
-			@state.provider = provider;
-			@state.general = dictionary();
-			state.general = general_fields;
-			@state.temporary = dictionary();
+			for (uint i = 0; i < catalog_order.length(); i++) {
+				string name = catalog_order[i];
+				catalog@ selected;
+				named_catalogs.get(name, @selected);
+				catalog@ snapshot = selected.snapshot();
+				state.add_catalog(name, snapshot);
+			}
+			state.set_provider(provider);
+			state.capture_general(general_fields);
 			string reason;
-			if (!detail::copy_fields(arguments, state.temporary, reason)) {
-				state.error.code = "argument";
-				state.error.message = reason;
+			if (!state.copy_arguments(arguments, reason)) {
+				state.set_setup_error("argument", reason);
 			}
 			return state;
 		}
@@ -562,8 +705,8 @@ namespace opensqcat {
 			string&out text, dictionary@ arguments = null, evaluation_budget@ budget = null) {
 			text = "";
 			detail::evaluation@ state = prepare(arguments, budget);
-			bool valid = state.error.code.length() == 0 && state.render_key(key, text, null, 1, catalog_name);
-			@last_diagnostic = state.error.copy();
+			bool valid = !state.failed() && state.render_key(key, text, null, 1, catalog_name);
+			@last_diagnostic = state.get_diagnostic();
 			return valid;
 		}
 		string get(const string&in key, dictionary@ arguments = null, evaluation_budget@ budget = null) {
@@ -595,8 +738,8 @@ namespace opensqcat {
 			item.source = source;
 			@item.compiled = compiled;
 			detail::evaluation@ state = prepare(arguments, budget);
-			bool valid = state.error.code.length() == 0 && state.render_inline(item, text, catalog_name);
-			@last_diagnostic = state.error.copy();
+			bool valid = !state.failed() && state.render_inline(item, text, catalog_name);
+			@last_diagnostic = state.get_diagnostic();
 			return valid;
 		}
 		string format(const string&in source, dictionary@ arguments = null, evaluation_budget@ budget = null) {

@@ -1,70 +1,101 @@
 # Application integration
 
-This guide explains catalog selection, field resolution and error-handling
-decisions for applications. For a guided first program, start with the
-[tutorials](../tutorials/README.md). Exact signatures are in the
-[API reference](../api/README.md).
+OpenSQCat loads catalogs, resolves template fields and returns text. The
+application controls which files to load, which catalog to use for a language,
+how to handle failures, and how to display or speak the result.
 
 ## Load and select catalogs
 
-`load("locales/en.sqcat")` registers a catalog as `en`. The first installed catalog
-becomes the default; later loads leave that selection unchanged. Paths are used
-as supplied. Applications choose their own directory layout and language policy.
+`translator.load(path)` registers a catalog using the file name without its
+final `.sqcat` suffix. For example, loading `locales/en.sqcat` registers `en`.
+The first successfully loaded named catalog becomes the default unless the
+program has already explicitly selected one. Loading later named catalogs does
+not change that selection.
 
-Use `set_default_catalog("en")` to select a loaded catalog. Use
-`get_from("common", "hint")` to retrieve from another catalog explicitly. Inside
-a template, `{$hint}` references the containing catalog and `{$common/hint}`
-references a loaded catalog named `common`. These references do not load files.
+Call `set_default_catalog("fr")` after loading `fr.sqcat` to switch languages.
+Use `get_from("common", "controls")` when a particular operation should use a
+different loaded catalog. In templates, `{$hint}` references the catalog
+containing the current message and `{$common/hint}` references the loaded
+catalog named `common`. A reference never loads a file or searches other
+catalogs for a missing key.
 
-Check the boolean return from loading and selection operations. A failed load
-preserves the previous catalog and default selection. For naming, replacement
-and removal rules, see [catalog management](../api/translator.md#catalog-management)
-and [loading](../api/translator.md#loading-and-raw-lookup).
+The named overload of `set_catalog(name, catalog)` registers or replaces a
+catalog; the unnamed overload installs a catalog as the default. Registering
+the first named catalog selects it only if no default was explicitly selected.
+The unnamed overload also replaces the registered object when the current
+default is named. Removing the selected named catalog selects the earliest
+remaining registration, or an empty anonymous catalog if none remain. Failed
+file loads preserve the previous catalog and selection.
 
 ## Supply application values
 
 Fields are resolved in this order:
 
-1. Temporary arguments passed to a single formatting call.
+1. Arguments passed to the current formatting call.
 2. General values stored with `set_variable` or `set_variables`.
-3. An optional dynamic provider or resolver.
+3. A dynamic provider or resolver, if installed.
 
-A present empty string, zero or false value stops the search. General setters
-store copies; update them when application state changes. For live values, use
-the provider or resolver pattern in the [live-values tutorial](../tutorials/live-values.md).
-Provider results are cached for one formatting operation, including references.
+A value that exists stops the search even if it is empty text, zero or false.
+General values and dictionary arguments are copied; changing their source later
+does not update a stored value. A provider or resolver is called for fields not
+found in those sources. Results and absence are cached by name for one formatting
+operation, including messages referenced during that operation.
 
-Dictionary strings are text. Plain dictionary numbers and booleans use NVGT's
-double-precision conversion; false/true become 0/1, and large integers can lose
-precision. Typed setters preserve booleans and 64-bit integers. Use native `var`
-for exact types in temporary dictionaries, such as `{{"logged_in", var(true)}}`.
-See [values and providers](../api/values.md) for validation and lifetime rules.
+Typed `set_variable` calls preserve text, boolean, signed integer, unsigned
+integer and real categories (integers retain 64-bit precision). In dictionaries,
+strings remain text, while plain numbers and booleans are converted through
+NVGT's double-precision numeric representation: false/true become 0/1 and large
+integers can lose precision. Use `var(true)` or `var(int64(...))` in dictionary
+arguments when the original category or full integer precision matters.
 
 ## Retrieve text and handle failures
 
-`get(key)` looks up and evaluates a catalog message. `format(text)` evaluates an
-inline template. `lookup(key, output)` retrieves a raw template without evaluation.
+- `get(key)` formats a message from the selected default catalog. It returns
+  `key` on failure.
+- `get_from(catalog, key)` does the same using a named catalog; an empty catalog
+  name selects the default.
+- `format(template)` formats an inline template. It returns empty text on
+  failure.
+- `lookup(key, output)` retrieves the raw template without evaluating it.
+- `try_get`, `try_get_from`, `try_format` and `try_format_from` return `false`
+  on failure, clear the output and leave a diagnostic in `error`. They return
+  `true` for valid empty text.
 
-On failure, `get` returns the supplied key and `format` returns empty text. For
-an explicit result, use `try_get` or `try_format`: they return false, clear the
-output and set `error`. Successful evaluations clear `error`. Valid messages can
-produce empty text, so output length alone does not establish success.
-
-Inspect `error.code`, `message`, `path`, `catalog`, `key`, `line` and `column` as
-needed. See [diagnostics](../api/diagnostics.md). The library returns diagnostics
-without logging them. Applications decide whether to display an error, choose a
-fallback language or supply alternative text; no automatic fallback is installed.
+Check the return value when failure must be distinguished from valid text. The
+diagnostic provides a machine-readable `code` and a human-readable `message`,
+with `path`, `catalog`, `key`, `line` and `column` when available. Common codes
+include `io`, `encoding`, `syntax`, `catalog`, `message`, `field`, `provider`,
+`cycle` and `limit`. The library does not log diagnostics. The application
+decides whether to show an error, supply fallback text or select another
+language; no automatic fallback is installed.
 
 ## Write templates
 
-Catalogs contain one `key = template` per line. Templates support fields,
-references, comparisons, short-circuit conditions and `join` for optional parts.
-Field values are inserted as data and are never parsed again as templates.
+Catalogs contain one `key = template` entry per line. Templates can insert
+fields, include messages from loaded catalogs, select text with comparisons and
+conditions, and combine optional fragments with `join`. Inserted values are
+data; they are not parsed again as templates. OpenSQCat implements SQCat 1 and
+recognizes only the `!sqcat_format_version` declaration. Unknown optional
+directives are ignored and unknown required directives fail loading. The
+[format specification](format.md) defines the complete file and expression
+grammar.
 
-Read the [SQCat specification](format.md) for syntax, version declarations,
-directives and numeric behavior. OpenSQCat supports SQCat 1 and recognizes only
-`!sqcat_format_version`. Unknown optional directives are ignored; unknown required
-directives fail loading. There is no application directive registry.
+## Evaluation limits
 
-Evaluation has [resource limits](../api/diagnostics.md#limits). An optional
-[shared budget](../api/budget.md) bounds work across several rendering calls.
+OpenSQCat applies these limits:
+
+| Resource | Limit |
+| --- | --- |
+| Catalog input | 16 MiB of UTF-8 bytes. |
+| One template source | 1 MiB. |
+| Parsed nodes per template | 32,768. |
+| Expression nesting | 64 depth units. |
+| Active referenced messages | 32, including the root message. |
+| Evaluation steps | 65,536 per formatting operation. |
+| Cumulative generated text | 1 MiB per formatting operation. |
+
+Generated-text accounting includes intermediate reference and `join` results,
+not only the final text. Passing the same `evaluation_budget` to several calls
+shares the step and generated-text allowances across those calls; depth and
+active-reference limits remain per operation. These are fixed library limits,
+not controls for application code or provider execution.

@@ -1,0 +1,16 @@
+#include "../../src/opensqcat.nvgt"
+
+void main() {
+	opensqcat::translator messages;
+	if (!messages.load("locales/en.sqcat")) {
+		alert("OpenSQCat", messages.error.message);
+		return;
+	}
+	if (!messages.set_variable("player", "Alex")) {
+		alert("OpenSQCat", messages.error.message);
+		return;
+	}
+
+	string greeting = messages.get("welcome");
+	alert("Welcome", greeting);
+}

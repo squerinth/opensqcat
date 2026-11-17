@@ -31,6 +31,75 @@ namespace opensqcat {
 			program@ compiled;
 		}
 
+		final class catalog_revision {
+			private dictionary entries;
+			private uint owners = 0;
+			private string path_value;
+
+			void retain() {
+				owners++;
+			}
+			void release() {
+				if (owners > 0) {
+					owners--;
+				}
+			}
+			bool shared() const {
+				return owners > 1;
+			}
+			catalog_revision@ copy() const {
+				catalog_revision@ result = catalog_revision();
+				result.entries = entries;
+				result.path_value = path_value;
+				return result;
+			}
+			uint size() const {
+				return entries.get_size();
+			}
+			bool contains(const string&in key) const {
+				return entries.exists(key);
+			}
+			bool get(const string&in key, message@&out item) const {
+				if (!entries.get(key, @item) || item is null) {
+					@item = null;
+					return false;
+				}
+				return true;
+			}
+			bool lookup(const string&in key, string&out text) const {
+				text = "";
+				message@ item;
+				if (!entries.get(key, @item) || item is null) {
+					return false;
+				}
+				text = item.source;
+				return true;
+			}
+			string[]@ keys() const {
+				return entries.get_keys();
+			}
+			bool set(const string&in key, message@ item) {
+				if (item is null) {
+					return false;
+				}
+				entries.set(key, @item);
+				return true;
+			}
+			bool remove(const string&in key) {
+				return entries.delete(key);
+			}
+			void clear_path() {
+				path_value = "";
+			}
+			string get_path() const {
+				return path_value;
+			}
+			void replace_entries(dictionary@ source, const string&in path) {
+				entries = source;
+				path_value = path;
+			}
+		}
+
 		uint leading_space(const string&in text) {
 			uint result = 0;
 			while (result < text.length() && " \t".find(text.substr(result, 1)) >= 0) {
@@ -109,18 +178,51 @@ namespace opensqcat {
 	}
 
 	class catalog {
-		private dictionary entries;
+		private detail::catalog_revision@ revision;
 		private diagnostic@ last_diagnostic = diagnostic();
-		private string path_value;
+
+		catalog() {
+			@revision = detail::catalog_revision();
+			revision.retain();
+		}
+		private catalog(detail::catalog_revision@ source) {
+			@revision = source;
+			if (revision !is null) {
+				revision.retain();
+			}
+		}
+		~catalog() {
+			if (revision !is null) {
+				revision.release();
+			}
+		}
+		private void replace_revision(detail::catalog_revision@ source) {
+			if (revision is source) {
+				return;
+			}
+			if (revision !is null) {
+				revision.release();
+			}
+			@revision = source;
+			if (revision !is null) {
+				revision.retain();
+			}
+		}
+		private void make_revision_writable() {
+			if (revision.shared()) {
+				detail::catalog_revision@ writable = revision.copy();
+				replace_revision(writable);
+			}
+		}
 
 		diagnostic@ get_error() const property {
 			return last_diagnostic.copy();
 		}
 		string get_loaded_path() const property {
-			return path_value;
+			return revision.get_path();
 		}
 		uint get_size() const property {
-			return entries.get_size();
+			return revision.size();
 		}
 		private bool fail(const string&in code, const string&in reason,
 			const string&in path = "", uint line = 0,
@@ -213,19 +315,13 @@ namespace opensqcat {
 			return result;
 		}
 		bool contains(const string&in key) const {
-			return entries.exists(key);
+			return revision.contains(key);
 		}
 		bool lookup(const string&in key, string&out text) const {
-			text = "";
-			detail::message@ item;
-			if (!entries.get(key, @item)) {
-				return false;
-			}
-			text = item.source;
-			return true;
+			return revision.lookup(key, text);
 		}
 		string[]@ keys() const {
-			return entries.get_keys();
+			return revision.keys();
 		}
 		bool set(const string&in key, const string&in text) {
 			if (key.length() == 0 || !utf8valid(key, false)) {
@@ -235,22 +331,24 @@ namespace opensqcat {
 			if (item is null) {
 				return false;
 			}
-			entries.set(key, @item);
-			path_value = "";
+			make_revision_writable();
+			revision.set(key, item);
+			revision.clear_path();
 			@last_diagnostic = diagnostic();
 			return true;
 		}
 		bool remove(const string&in key) {
-			bool removed = entries.delete(key);
+			bool removed = revision.contains(key);
 			if (removed) {
-				path_value = "";
+				make_revision_writable();
+				revision.remove(key);
+				revision.clear_path();
 			}
 			@last_diagnostic = diagnostic();
 			return removed;
 		}
 		void clear() {
-			entries.delete_all();
-			path_value = "";
+			replace_revision(detail::catalog_revision());
 			@last_diagnostic = diagnostic();
 		}
 		bool load(const string&in path) {
@@ -282,7 +380,7 @@ namespace opensqcat {
 			if (!select_version(contents, origin) || !preprocess(contents, origin)) {
 				return false;
 			}
-			dictionary staged;
+			dictionary@ staged = dictionary();
 			detail::line_reader lines(contents);
 			string line;
 			while (lines.next(line)) {
@@ -309,25 +407,26 @@ namespace opensqcat {
 				}
 				staged.set(key, @item);
 			}
-			entries = staged;
-			path_value = origin;
+			detail::catalog_revision@ replacement = detail::catalog_revision();
+			replacement.replace_entries(staged, origin);
+			replace_revision(replacement);
 			@last_diagnostic = diagnostic();
 			return true;
 		}
 
-		// Internal operation snapshot. Keep shared parsed records encapsulated:
-		// public mutations replace entries, never modify an existing record.
+		// Snapshots share immutable revisions. Mutations detach before writing
+		// whenever another catalog or evaluation still retains the old revision.
 		catalog@ snapshot() const {
-			catalog@ result = catalog();
-			result.entries = entries;
-			result.path_value = path_value;
-			return result;
+			return catalog(revision);
 		}
 		// Render without exposing a mutable message or its compiled nodes.
 		bool render(const string&in key, detail::evaluation@ state, string&out text) const {
+			text = "";
+			if (state is null) {
+				return false;
+			}
 			detail::message@ item;
-			if (!entries.get(key, @item)) {
-				text = "";
+			if (!revision.get(key, @item)) {
 				return false;
 			}
 			return state.render_message(item, text);

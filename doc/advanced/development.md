@@ -32,10 +32,12 @@ Omit `-NvgtPath` to use `NVGT_EXE`, then `nvgt.exe` on `PATH`.
 `-BuildDirectory <path>` changes the temporary workspace location. The runner
 reports the compiler version and commit used for the check.
 
-Verification runs the contracts, console example, README program and tutorial
-program in a standalone copy. It compares their outputs with the documented
-results and checks the target version syntax, local documentation links, heading
-fragments and source includes. External URLs are not checked.
+Verification runs the contracts and the GUI example plus README and tutorial
+programs in a standalone copy. Test copies redirect alert calls to the console
+so dialog contents can be compared with the documentation without blocking on
+a window. It also checks target-version syntax, local
+documentation links, heading fragments and source includes. External URLs are
+not checked.
 
 Project installation is checked on every run. After changing includes, the global
 wrapper or the distribution layout, add `-CheckGlobalInstallation` to test an
